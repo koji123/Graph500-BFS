@@ -1,4 +1,5 @@
-SW =GNU3
+#SW =GNU3
+SW=FUGAKU
 VAMP = false
 SCOREP = false
 
@@ -6,9 +7,10 @@ SCOREP = false
 LDFLAGS := -fopenmp -g # -pg
 NVCCFLAGS := -Drestrict=__restrict__ -Xcompiler -fopenmp,-ffast-math,-Wall -arch=compute_20 -code=sm_20
 
+FUGAKU_POWER_MEASUREMENT=true
 VERBOSE = false
-VERTEX_REORDERING = 0
-REAL_BENCHMARK = false
+VERTEX_REORDERING = 2
+REAL_BENCHMARK = true
 ifeq ($(VERBOSE), false)
 VERBOSE_OPT = -DVERVOSE_MODE=0
 else
@@ -19,6 +21,10 @@ ifeq ($(REAL_BENCHMARK), false)
 REAL_BENCHMARK_OPT =
 else
 REAL_BENCHMARK_OPT = -DREAL_BENCHMARK
+endif
+ifeq ($(FUGAKU_POWER_MEASUREMENT), true)
+FUGAKU_POWER_CFLAGS=-D_FUGAKU_POWER_MEASUREMENT
+FUGAKU_POWER_CLINK=-lpwr
 endif
 
 
@@ -40,7 +46,7 @@ CUOBJ := cuda_kernel.o
 LIBS := -lm
 
 ifeq ($(SW), GNU3)
-CFLAGS := $(GCC_BASE) -O3 -DNDEBUG
+CFLAGS := $(GCC_BASE) -O3 -DNDEBUG -DPROFILE_REGIONS
 NVCCFLAGS := $(NVFLAG_BASE) -g -O3 -DNDEBUG -keep
 LIBS := $(LIBS) -lnuma
 endif
@@ -72,6 +78,14 @@ endif
 CFLAGS := $(FCC_BASE) -g -O0
 LDFLAGS := $(CFLAGS)
 endif
+ifeq ($(SW), FUGAKU)
+MPICC := mpifccpx
+MPICPP := mpiFCCpx
+FCC_BASE := -Kopenmp -Drestrict=__restrict__  $(VERBOSE_OPT) $(VERTEX_REORDERING_OPT) $(REAL_BENCHMARK_OPT)
+CFLAGS := $(FCC_BASE) -Kfast -DNDEBUG -DPROFILE_REGIONS $(FUGAKU_POWER_CFLAGS)
+LDFLAGS := $(CFLAGS) -Nfjomplib $(FUGAKU_POWER_CLINK)
+#LDFLAGS := $(CFLAGS)
+endif
 
 ifeq ($(SW), UVGNU3)
 MPICC := mpicc-gcc4.7
@@ -85,13 +99,22 @@ MPICPP := mpicxx-gcc4.7
 CFLAGS := $(GCC_BASE) -O0
 LIBS :=  $(LIBS) -lnuma -lmpi
 endif
+#ifeq ($(SW), INTEL3)
+#MPICC := icc
+#MPICPP := icpc
+#CFLAGS := -ipo -no-prec-div -openmp -g3 -Drestrict=__restrict__ -O3 -DNDEBUG
+##CFLAGS := -ipo -openmp -g3 -Drestrict=__restrict__ -O2 -DNDEBUG
+#NVCCFLAGS := $(NVFLAG_BASE) -g -O3 -DNDEBUG -keep
+#LDFLAGS := -openmp -g
+#LIBS := $(LIBS) -lnuma -lmpi
+#endif
 ifeq ($(SW), INTEL3)
-MPICC := icc
-MPICPP := icpc
-CFLAGS := -ipo -no-prec-div -openmp -g3 -Drestrict=__restrict__ -O3 -DNDEBUG
+MPICC := mpiicc
+MPICPP := mpiicpc
+CFLAGS := -ipo -no-prec-div -qopenmp -g3 -Drestrict=__restrict__ -O3 -DNDEBUG $(VERBOSE_OPT) $(VERTEX_REORDERING_OPT) $(REAL_BENCHMARK_OPT)
 #CFLAGS := -ipo -openmp -g3 -Drestrict=__restrict__ -O2 -DNDEBUG
 NVCCFLAGS := $(NVFLAG_BASE) -g -O3 -DNDEBUG -keep
-LDFLAGS := -openmp -g
+LDFLAGS := -qopenmp -g
 LIBS := $(LIBS) -lnuma -lmpi
 endif
 ifeq ($(SW), INTEL0)

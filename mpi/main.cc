@@ -13,6 +13,9 @@
 #include <stdint.h>
 #include <inttypes.h>
 #include <math.h>
+#ifdef _FUGAKU_POWER_MEASUREMENT
+#include "pwr.h"
+#endif
 
 // C++ includes
 #include <string>
@@ -87,21 +90,81 @@ void graph500_bfs(int SCALE, int edgefactor)
 		init_log(SCALE, edgefactor, generation_time, construction_time, redistribution_time, &log);
 
 	benchmark->prepare_bfs();
-// narashi
-		double time_left = PRE_EXEC_TIME;
-        for(int c = root_start; time_left > 0.0; ++c) {
-                if(mpi.isMaster())  print_with_prefix("========== Pre Running BFS %d ==========", c);
-                MPI_Barrier(mpi.comm_2d);
-                double bfs_time = MPI_Wtime();
-                benchmark->run_bfs(bfs_roots[c % num_bfs_roots], pred);
-                bfs_time = MPI_Wtime() - bfs_time;
-                if(mpi.isMaster()) {
-                        print_with_prefix("Time for BFS %d is %f", c, bfs_time);
-                        time_left -= bfs_time;
-                }
-               MPI_Bcast(&time_left, 1, MPI_DOUBLE, 0, mpi.comm_2d);
-        }
+	
+	if(PRE_EXEC_TIME != 0){
+#ifdef _FUGAKU_POWER_MEASUREMENT
+	  PWR_Cntxt cntxt = NULL;
+	  PWR_Obj obj = NULL;
+	  int rc;
+	  double energy1 = 0.0;
+	  double energy2 = 0.0;
+	  double menergy1 = 0.0;
+	  double menergy2 = 0.0;
+	  double ave_power[2];
+	  double t_power[2];
+	  PWR_Time ts1 = 0;
+	  PWR_Time ts2 = 0;
+	  rc = PWR_CntxtInit(PWR_CNTXT_FX1000, PWR_ROLE_APP, "app", &cntxt);
+	  if (rc != PWR_RET_SUCCESS) {
+	    printf("CntxtInit Failed\n");
+	  }
+	  rc = PWR_CntxtGetObjByName(cntxt, "plat.node", &obj);
+	  if (rc != PWR_RET_SUCCESS) {
+	    printf("CntxtGetObjByName Failed\n");
+	  }
+	  rc = PWR_ObjAttrGetValue(obj, PWR_ATTR_MEASURED_ENERGY, &menergy1, &ts1);
+	  if (rc != PWR_RET_SUCCESS) {
+	    printf("ObjAttrGetValue Failed (rc = %d)\n", rc);
+	  }
+	  rc = PWR_ObjAttrGetValue(obj, PWR_ATTR_ENERGY, &energy1, NULL);
+	  if (rc != PWR_RET_SUCCESS) {
+	    printf("ObjAttrGetValue Failed (rc = %d)\n", rc);
+	  }
+#endif
+      if(mpi.isMaster()){
+        time_t t = time(NULL);
+        print_with_prefix("Start energy loop : %s", ctime(&t));
+      }
+	  double time_left = PRE_EXEC_TIME;
+	  for(int c = root_start; time_left > 0.0; ++c) {
+		if(mpi.isMaster())
+		  print_with_prefix("========== Pre Running BFS %d ==========", c);
+		MPI_Barrier(mpi.comm_2d);
+		double bfs_time = MPI_Wtime();
+		benchmark->run_bfs(bfs_roots[c % num_bfs_roots], pred);
+		bfs_time = MPI_Wtime() - bfs_time;
+		if(mpi.isMaster()) {
+		  print_with_prefix("Time for BFS %d is %f", c, bfs_time);
+		  time_left -= bfs_time;
+		}
+		MPI_Bcast(&time_left, 1, MPI_DOUBLE, 0, mpi.comm_2d);
+	  }
+      if(mpi.isMaster()){
+        time_t t = time(NULL);
+        print_with_prefix("End energy loop : %s", ctime(&t));
+      }
+#ifdef _FUGAKU_POWER_MEASUREMENT
+	  rc = PWR_ObjAttrGetValue(obj, PWR_ATTR_MEASURED_ENERGY, &menergy2, &ts2);
+	  if (rc != PWR_RET_SUCCESS) {
+	    printf("ObjAttrGetValue Failed (rc = %d)\n", rc);
+	  }
+	  rc = PWR_ObjAttrGetValue(obj, PWR_ATTR_ENERGY, &energy2, NULL);
+	  if (rc != PWR_RET_SUCCESS) {
+	    printf("ObjAttrGetValue Failed (rc = %d)\n", rc);
+	  }
+	  ave_power[0] = (menergy2 - menergy1) / ((ts2 - ts1) / 1000000000.0);
+	  ave_power[1] = (energy2 - energy1) / ((ts2 - ts1) / 1000000000.0);
+	  MPI_Reduce(ave_power, t_power, 2, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+	  if(mpi.isMaster()){
+        print_with_prefix("total measured average power : %lf", t_power[0]);
+        print_with_prefix("total estimated average power : %lf", t_power[1]);
+	  }
+#endif
+	}
 /////////////////////
+#ifdef PROFILE_REGIONS
+	timer_clear();
+#endif
 	for(int i = root_start; i < num_bfs_roots; ++i) {
 	//for(int i = 0; i < num_bfs_roots; ++i) {
 		VERVOSE(print_max_memory_usage());
@@ -111,10 +174,16 @@ void graph500_bfs(int SCALE, int edgefactor)
 		fapp_start("bfs", i, 1);
 #endif
 		MPI_Barrier(mpi.comm_2d);
+#if FUGAKU_MPI_PRINT_STATS
+		FJMPI_Collection_start();
+#endif
 		PROF(profiling::g_pis.reset());
 		bfs_times[i] = MPI_Wtime();
 		benchmark->run_bfs(bfs_roots[i], pred);
 		bfs_times[i] = MPI_Wtime() - bfs_times[i];
+#if FUGAKU_MPI_PRINT_STATS
+                FJMPI_Collection_stop();
+#endif
 #if ENABLE_FUJI_PROF
 		fapp_stop("bfs", i, 1);
 #endif
@@ -148,7 +217,7 @@ void graph500_bfs(int SCALE, int edgefactor)
 
 		if(mpi.isMaster()) {
 			print_with_prefix("Validate time for BFS %d is %f", i, validate_times[i]);
-			print_with_prefix("Number of traversed edges is %"PRId64"", edge_visit_count);
+			print_with_prefix("Number of traversed edges is %" PRId64 "", edge_visit_count);
 			print_with_prefix("TEPS for BFS %d is %g", i, edge_visit_count / bfs_times[i]);
 		}
 
@@ -171,6 +240,13 @@ void graph500_bfs(int SCALE, int edgefactor)
 	  fprintf(stdout, "redistribution_time:            %g\n", redistribution_time);
 	  print_bfs_result(num_bfs_roots, bfs_times, validate_times, edge_counts, result_ok);
 	}
+#ifdef PROFILE_REGIONS
+	timer_print(bfs_times, num_bfs_roots);
+#endif
+
+#if FUGAKU_MPI_PRINT_STATS
+	FJMPI_Collection_print("Communication Statistics\n");
+#endif
 
 	delete benchmark;
 
@@ -222,11 +298,75 @@ int main(int argc, char** argv)
 	}
 
 	setup_globals(argc, argv, SCALE, edgefactor);
-
 	graph500_bfs(SCALE, edgefactor);
-
 	cleanup_globals();
 	return 0;
 }
 
+double elapsed[NUM_RESIONS], start[NUM_RESIONS];
+void timer_clear()
+{
+  for(int i=0;i<NUM_RESIONS;i++)
+    elapsed[i] = 0.0;
+}
 
+void timer_start(const int n)
+{
+  start[n] = MPI_Wtime();
+}
+
+void timer_stop(const int n)
+{
+  double now = MPI_Wtime();
+  double t = now - start[n];
+  elapsed[n] += t;
+}
+
+double timer_read(const int n)
+{
+  return(elapsed[n]);
+}
+
+void timer_print(double *bfs_times, const int num_bfs_roots)
+{
+  double t[NUM_RESIONS], t_max[NUM_RESIONS], t_min[NUM_RESIONS], t_ave[NUM_RESIONS];
+  for(int i=0;i<NUM_RESIONS;i++)
+    t[i] = timer_read(i);
+
+  t[TOTAL_TIME] = 0.0;
+  for(int i=0;i<num_bfs_roots;i++)
+	t[TOTAL_TIME] += bfs_times[i];
+
+  double comm_time = t[TD_EXPAND_TIME] + t[BU_EXPAND_TIME] + t[TD_FOLD_TIME] + t[BU_FOLD_TIME] + t[BU_NBR_TIME];
+  t[CALC_TIME]	= (t[TD_TIME] + t[BU_TIME]) - comm_time - t[IMBALANCE_TIME];
+  t[OTHER_TIME] = t[TOTAL_TIME] - (t[TD_TIME] + t[BU_TIME]);
+
+  MPI_Reduce(t, t_max, NUM_RESIONS, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  MPI_Reduce(t, t_min, NUM_RESIONS, MPI_DOUBLE, MPI_MIN, 0, MPI_COMM_WORLD);
+  MPI_Reduce(t, t_ave, NUM_RESIONS, MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+
+  int size;
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+  for(int i=0;i<NUM_RESIONS;i++)
+    t_ave[i] /= size;
+
+  fflush(stdout);
+  MPI_Barrier(MPI_COMM_WORLD);
+  if(mpi.isMaster()){
+    printf("---\n");
+    printf("CATEGORY :                 :   MAX    MIN    AVE   AVE/TIME\n");
+    printf("TOTAL                      : %6.5f %6.5f %6.5f (%6.5f%%)\n", CAT(TOTAL_TIME));
+    printf(" - TOP_DOWN                : %6.5f %6.5f %6.5f (%6.5f%%)\n", CAT(TD_TIME));
+    printf(" - BOTTOM_UP               : %6.5f %6.5f %6.5f (%6.5f%%)\n", CAT(BU_TIME));
+    printf("   - LOCAL_CALC            : %6.5f %6.5f %6.5f (%6.5f%%)\n", CAT(CALC_TIME));
+    printf("   - TD_EXPAND(allgather)  : %6.5f %6.5f %6.5f (%6.5f%%)\n", CAT(TD_EXPAND_TIME));
+    printf("   - BU_EXPAND(allgather)  : %6.5f %6.5f %6.5f (%6.5f%%)\n", CAT(BU_EXPAND_TIME));
+    printf("   - TD_FOLD(alltoall)     : %6.5f %6.5f %6.5f (%6.5f%%)\n", CAT(TD_FOLD_TIME));
+    printf("   - BU_FOLD(alltoall)     : %6.5f %6.5f %6.5f (%6.5f%%)\n", CAT(BU_FOLD_TIME));
+    printf("   - BU_NEIGHBOR(sendrecv) : %6.5f %6.5f %6.5f (%6.5f%%)\n", CAT(BU_NBR_TIME));
+    printf("   - PROC_IMBALANCE        : %6.5f %6.5f %6.5f (%6.5f%%)\n", CAT(IMBALANCE_TIME));
+    printf(" - OTHER                   : %6.5f %6.5f %6.5f (%6.5f%%)\n", CAT(OTHER_TIME));
+  }
+  fflush(stdout);
+  MPI_Barrier(MPI_COMM_WORLD);
+}

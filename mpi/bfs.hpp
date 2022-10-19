@@ -7,15 +7,17 @@
 
 #ifndef BFS_HPP_
 #define BFS_HPP_
-
 #include <pthread.h>
-
 #include <deque>
 
 #if CUDA_ENABLED
 #include "gpu_host.hpp"
 #endif
 
+#ifdef PROFILE_REGIONS
+static int current_expand = TD_EXPAND_TIME;
+int current_fold = TD_FOLD_TIME;
+#endif
 #include "utils.hpp"
 #include "fiber.hpp"
 #include "abstract_comm.hpp"
@@ -90,7 +92,6 @@ public:
 		, bu_comm_(mpi.comm_2dr, &bottom_up_comm_)
 		, denom_to_bottom_up_(DENOM_TOPDOWN_TO_BOTTOMUP)
 		, denom_bitmap_to_list_(DENOM_BITMAP_TO_LIST)
-		, thread_sync_(omp_get_max_threads())
 	{
 	}
 
@@ -490,10 +491,14 @@ public:
 				int64_t root_local = vertex_local(root);
 				int64_t reordered = graph_.reorder_map_[root_local];
 				root_reordered = (reordered * mpi.size_2d) + root_owner;
-
+#ifdef PROFILE_REGIONS
+				timer_start(current_expand);
+#endif
 				MPI_Bcast(&root_reordered, 1, MpiTypeOf<int64_t>::type,
 						root_c, mpi.comm_2dr);
-
+#ifdef PROFILE_REGIONS
+				timer_stop(current_expand);
+#endif
 				// update pred
 				pred_[root_local] = root;
 
@@ -503,8 +508,14 @@ public:
 				((BitmapType*)new_visited_)[word_idx] |= BitmapType(1) << bit_idx;
 			}
 			else {
+#ifdef PROFILE_REGIONS
+			  timer_start(current_expand);
+#endif
 				MPI_Bcast(&root_reordered, 1, MpiTypeOf<int64_t>::type,
 						root_c, mpi.comm_2dr);
+#ifdef PROFILE_REGIONS
+				 timer_stop(current_expand);
+#endif
 			}
 
 			// update CQ
@@ -527,6 +538,9 @@ public:
 			BitmapType* recv_buffer = shared_visited_;
 			// TODO: asymmetric size for z. (MPI_Allgather -> MPI_Allgatherv or MpiCol::allgatherv ?)
 			int shared_bitmap_width = bitmap_width * mpi.size_z;
+#ifdef PROFILE_REGIONS
+			timer_start(current_expand);
+#endif
 #if ENABLE_MY_ALLGATHER
 			if(mpi.isYdimAvailable()) {
 				if(mpi.isMaster()) print_with_prefix("Error: MY_ALLGATHER does not support shared memory Y dimension.");
@@ -543,6 +557,9 @@ public:
 #if VERVOSE_MODE
 			g_expand_bitmap_comm += shared_bitmap_width * mpi.size_y * sizeof(BitmapType);
 #endif
+#ifdef PROFILE_REGIONS
+			timer_stop(current_expand);
+#endif
 		}
 		if(mpi.isYdimAvailable()) s_.sync->barrier();
 	}
@@ -553,6 +570,9 @@ public:
 		int bitmap_width = get_bitmap_size_local();
 		BitmapType* const bitmap = (BitmapType*)new_visited_;
 		BitmapType* recv_buffer = shared_visited_;
+#ifdef PROFILE_REGIONS
+		timer_start(current_expand);
+#endif
 #if ENABLE_MY_ALLGATHER
 		if(mpi.isYdimAvailable()) {
 			if(mpi.isMaster()) print_with_prefix("Error: MY_ALLGATHER does not support shared memory Y dimension.");
@@ -566,6 +586,9 @@ public:
 		MPI_Allgather(bitmap, bitmap_width, get_mpi_type(bitmap[0]),
 				recv_buffer, bitmap_width, get_mpi_type(bitmap[0]), mpi.comm_2dr);
 #endif
+#ifdef PROFILE_REGIONS
+		timer_stop(current_expand);
+#endif
 #if VERVOSE_MODE
 		g_expand_bitmap_comm += bitmap_width * mpi.size_2dc * sizeof(BitmapType);
 #endif
@@ -574,8 +597,14 @@ public:
 	int expand_visited_list(int node_nq_size) {
 		TRACER(expand_vis_list);
 		if(mpi.rank_z == 0 && mpi.comm_y != MPI_COMM_NULL) {
+#ifdef PROFILE_REGIONS
+		  timer_start(current_expand);
+#endif
 			s_.offset[0] = MpiCol::allgatherv((TwodVertex*)visited_buffer_orig_,
 					 nq_recv_buf_, node_nq_size, mpi.comm_y, mpi.size_y);
+#ifdef PROFILE_REGIONS
+			timer_stop(current_expand);
+#endif
 			VERVOSE(g_expand_list_comm += s_.offset[0] * sizeof(TwodVertex));
 		}
 		if(mpi.isYdimAvailable()) s_.sync->barrier();
@@ -652,6 +681,9 @@ public:
 		TwodVertex* recv_buf = (TwodVertex*)((int64_t(cq_size_)*int64_t(sizeof(TwodVertex)) > work_buf_size_) ?
 				(work_extra_buf_ = cache_aligned_xmalloc(cq_size_*sizeof(TwodVertex))) :
 				work_buf_);
+#ifdef PROFILE_REGIONS
+		timer_start(current_expand);
+#endif
 #if ENABLE_MY_ALLGATHER == 1
 		MpiCol::my_allgatherv(nq, nq_size, recv_buf, recv_size, recv_off, mpi.comm_r);
 #elif ENABLE_MY_ALLGATHER == 2
@@ -659,6 +691,9 @@ public:
 #else
 		MPI_Allgatherv(nq, nq_size, MpiTypeOf<TwodVertex>::type,
 				recv_buf, recv_size, recv_off, MpiTypeOf<TwodVertex>::type, mpi.comm_r.comm);
+#endif
+#ifdef PROFILE_REGIONS
+		timer_stop(current_expand);
 #endif
 		VERVOSE(g_expand_list_comm += cq_size_ * sizeof(TwodVertex));
 		cq_list_ = recv_buf;
@@ -680,8 +715,8 @@ public:
 		TRACER(td_sw_expand);
 		// expand NQ within a processor row
 		if(bitmap_or_list) {
-			// bitmap
-			expand_visited_bitmap();
+		  // bitmap
+		  expand_visited_bitmap();
 		}
 		else {
 			throw "Not implemented";
@@ -836,7 +871,7 @@ public:
 		return node_nq_size;
 	}
 
-	void bottom_up_expand_nq_list() {
+  void bottom_up_expand_nq_list() {
 		TRACER(bu_expand_nq_list);
 		assert (mpi.isYdimAvailable() || (visited_buffer_orig_ == visited_buffer_));
 		int lgl = graph_.local_bits_;
@@ -1156,10 +1191,16 @@ public:
 			}
 			tlb->cur_buffer = NULL;
 		}
+
 		int64_t send_nq_size = nq_size_;
 		PROF(seq_proc_time_ += tk_all);
 		PROF(MPI_Barrier(mpi.comm_2d));
 		PROF(fold_competion_wait_ += tk_all);
+#ifdef PROFILE_REGIONS
+		timer_start(IMBALANCE_TIME);
+		MPI_Barrier(mpi.comm_2d);
+		timer_stop(IMBALANCE_TIME);
+#endif
 		MPI_Allreduce(&nq_size_, &max_nq_size_, 1, MPI_INT, MPI_MAX, mpi.comm_2d);
 		MPI_Allreduce(&send_nq_size, &global_nq_size_, 1, MpiTypeOf<int64_t>::type, MPI_SUM, mpi.comm_2d);
 		PROF(gather_nq_time_ += tk_all);
@@ -1393,7 +1434,7 @@ public:
 			for(int i = 0; i < count_length; ++i) {
 				total_nq += phase_recv[i];
 			}
-			print_with_prefix("Bottom-Up: %"PRId64" vertexes found. Break down ...", total_nq);
+			print_with_prefix("Bottom-Up: %" PRId64 " vertexes found. Break down ...", total_nq);
 			for(int i = 0; i < count_length; ++i) {
 				print_with_prefix("step %d / %d  %f M Vertexes ( %f %% )",
 						i+1, count_length, to_mega(phase_recv[i]), (double)phase_recv[i] / (double)total_nq * 100.0);
@@ -1675,7 +1716,7 @@ public:
 #endif
 		VERVOSE(__sync_fetch_and_add(&num_edge_bottom_up_, tmp_edge_relax));
 		USER_END(bu_bmp_step);
-		thread_sync_.barrier();
+#pragma omp barrier
 		return visited_count;
 	}
 
@@ -1799,7 +1840,7 @@ public:
 		th_offset[tid+1] = num_enabled;
 		USER_END(bu_list_proc);
 		// TODO: measure wait time
-		thread_sync_.barrier();
+#pragma omp barrier
 #pragma omp master
 		{
 			TRACER(bu_list_single);
@@ -1809,7 +1850,7 @@ public:
 			}
 			assert (th_offset[max_threads] <= int(phase_size));
 		}
-		thread_sync_.barrier();
+#pragma omp barrier
 
 		USER_START(bu_list_write);
 		// make new list to send
@@ -1830,7 +1871,7 @@ public:
 		PROF(commit_time_ += ts_commit);
 		VERVOSE(__sync_fetch_and_add(&num_blocks, tmp_num_blocks));
 		VERVOSE(__sync_fetch_and_add(&num_edge_bottom_up_, tmp_edge_relax));
-		thread_sync_.barrier();
+#pragma omp barrier
 		return phase_size - th_offset[max_threads];
 	}
 
@@ -1988,7 +2029,7 @@ public:
 #ifndef NDEBUG
 		assert (buffer->length == 0);
 		assert (*process_counter == 0);
-		thread_sync_.barrier();
+#pragma omp barrier
 #endif
 		int tid = omp_get_thread_num();
 		int num_threads = omp_get_num_threads();
@@ -2006,8 +2047,14 @@ public:
 			PROF(extract_edge_time_ += tk_all);
 
 			if(tid == 0) {
+#ifdef PROFILE_REGIONS
+      timer_start(BU_NBR_TIME);
+#endif
 				// process async communication
 				bottom_up_substep_->probe();
+#ifdef PROFILE_REGIONS
+      timer_stop(BU_NBR_TIME);
+#endif
 			}
 
 			visited_count += buffer->length;
@@ -2030,9 +2077,7 @@ public:
 		PROF(commit_time_ += tk_all);
 #endif
 		USER_END(bu_bmp_step);
-
-		thread_sync_.barrier();
-
+#pragma omp barrier
 		PROF(extract_thread_wait_ += tk_all);
 		return visited_count;
 	}
@@ -2053,7 +2098,7 @@ public:
 		int max_threads = omp_get_num_threads();
 		TwodVertex* phase_list = (TwodVertex*)data.data;
 		TwodVertex phase_bmp_off = data.tag.region_id * step_bitmap_width;
-
+		
 		int lgl = graph_.local_bits_;
 		int r_bits = graph_.r_bits_;
 		TwodVertex L = graph_.num_local_verts_;
@@ -2124,7 +2169,7 @@ public:
 		th_offset[tid+1] = num_enabled;
 		PROF(extract_edge_time_ += tk_all);
 		USER_END(bu_list_proc);
-		thread_sync_.barrier();
+#pragma omp barrier
 		PROF(extract_thread_wait_ += tk_all);
 #pragma omp master
 		{
@@ -2135,7 +2180,7 @@ public:
 			}
 			assert (th_offset[max_threads] <= int(data.tag.length));
 		}
-		thread_sync_.barrier();
+#pragma omp barrier
 
 		USER_START(bu_list_write);
 		// make new list to send
@@ -2152,12 +2197,17 @@ public:
 		PROF(commit_time_ += tk_all);
 		VERVOSE(__sync_fetch_and_add(&num_blocks, tmp_num_blocks));
 		VERVOSE(__sync_fetch_and_add(&num_edge_bottom_up_, tmp_edge_relax));
-		thread_sync_.barrier();
+#pragma omp barrier
 		return data.tag.length - th_offset[max_threads];
 	}
 #endif // #if BFELL
 
 	void bottom_up_gather_nq_size(int* visited_count) {
+#ifdef PROFILE_REGIONS
+	  timer_start(IMBALANCE_TIME);
+	  MPI_Barrier(mpi.comm_2d);
+	  timer_stop(IMBALANCE_TIME);
+#endif
 		TRACER(bu_gather_info);
 		PROF(profiling::TimeKeeper tk_all);
 		PROF(MPI_Barrier(mpi.comm_2d));
@@ -2238,13 +2288,19 @@ public:
 					else {
 						// receive data
 						PROF(profiling::TimeKeeper tk_all);
+#ifdef PROFILE_REGIONS
+    timer_start(BU_NBR_TIME);
+#endif
 						bottom_up_substep_->recv(&data);
+#ifdef PROFILE_REGIONS
+    timer_stop(BU_NBR_TIME);
+#endif
+
 						PROF(comm_wait_time_ += tk_all);
 					}
 					process_counter = 0;
 				}
-				thread_sync_.barrier();
-
+#pragma omp barrier
 				int target_rank = data.tag.region_id / BU_SUBSTEP;
 				if(step >= BU_SUBSTEP && target_rank == mpi.rank_2dc) {
 					// This is rounded and came here.
@@ -2254,19 +2310,24 @@ public:
 					for(int64_t i = 0; i < step_bitmap_width; ++i) {
 						dst[i] = src[i];
 					}
-					thread_sync_.barrier();
+#pragma omp barrier
 				}
 				else {
-					visited_count[data.tag.routed_count + tid * comm_size] +=
-							bottom_up_search_bitmap_process_step(
-									data, step_bitmap_width, &process_counter, target_rank);
+				  visited_count[data.tag.routed_count + tid * comm_size] +=
+					bottom_up_search_bitmap_process_step(data, step_bitmap_width, &process_counter, target_rank);
 					if(tid == 0) {
+#ifdef PROFILE_REGIONS
+    timer_start(BU_NBR_TIME);
+#endif
 						if(step < BU_SUBSTEP) {
 							bottom_up_substep_->send_first(&data);
 						}
 						else {
 							bottom_up_substep_->send(&data);
 						}
+#ifdef PROFILE_REGIONS
+    timer_stop(BU_NBR_TIME);
+#endif
 					}
 				}
 			}
@@ -2276,7 +2337,7 @@ public:
 				bottom_up_substep_->finish();
 				PROF(comm_wait_time_ += tk_all);
 			}
-			thread_sync_.barrier();
+#pragma omp barrier
 
 		} // #pragma omp parallel
 		PROF(parallel_reg_time_ += tk_all);
@@ -2356,13 +2417,18 @@ public:
 					else {
 						// receive data
 						PROF(profiling::TimeKeeper tk_all);
+#ifdef PROFILE_REGIONS
+    timer_start(BU_NBR_TIME);
+#endif
 						bottom_up_substep_->recv(&data);
+#ifdef PROFILE_REGIONS
+    timer_stop(BU_NBR_TIME);
+#endif
 						PROF(comm_wait_time_ += tk_all);
 						write_buffer = back_buffer;
 					}
 				}
-				thread_sync_.barrier(); // TODO: compare with omp barrier
-
+#pragma omp barrier
 				int target_rank = data.tag.region_id / BU_SUBSTEP;
 				TwodVertex* phase_list = (TwodVertex*)data.data;
 				if(step >= BU_SUBSTEP && target_rank == mpi.rank_2dc) {
@@ -2377,7 +2443,7 @@ public:
 					{
 						new_visited_list_size_[local_region_id] = data.tag.length;
 					}
-					thread_sync_.barrier();
+#pragma omp barrier
 				}
 				else {
 					// write sentinel value to the last
@@ -2395,6 +2461,9 @@ public:
 						visited_count[data.tag.routed_count] += new_visited_cnt;
 						data.tag.length -= new_visited_cnt;
 
+#ifdef PROFILE_REGIONS
+    timer_start(BU_NBR_TIME);
+#endif
 						if(step < BU_SUBSTEP) {
 							data.data = write_buffer;
 							bottom_up_substep_->send_first(&data);
@@ -2404,6 +2473,9 @@ public:
 							data.data = write_buffer;
 							bottom_up_substep_->send(&data);
 						}
+#ifdef PROFILE_REGIONS
+    timer_stop(BU_NBR_TIME);
+#endif
 					}
 				}
 			}
@@ -2414,7 +2486,7 @@ public:
 				bottom_up_substep_->finish();
 				PROF(comm_wait_time_ += tk_all);
 			}
-			thread_sync_.barrier();
+#pragma omp barrier
 
 		} // #pragma omp parallel
 		PROF(parallel_reg_time_ += tk_all);
@@ -2447,7 +2519,6 @@ public:
 		int64_t num_blocks; int64_t num_vertexes;
 		bottom_up_list_parallel_section(visited_count, vertex_enabled, num_blocks, num_vertexes);
 		bu_comm_.run();
-
 		bottom_up_gather_nq_size(visited_count);
 		VERVOSE(botto_up_print_stt(num_blocks, num_vertexes, visited_count));
 		VERVOSE(bottom_up_substep_->print_stt());
@@ -2626,7 +2697,6 @@ public:
 	bool bitmap_or_list_;
 	bool growing_or_shrinking_;
 	bool packet_buffer_is_dirty_;
-	memory::SpinBarrier thread_sync_;
 
 	VERVOSE(int64_t num_edge_top_down_);
 	VERVOSE(int64_t num_td_large_edge_);
@@ -2666,9 +2736,7 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred)
 	int64_t total_edge_top_down = 0;
 	int64_t total_edge_bottom_up = 0;
 #endif
-
 	initialize_memory(pred);
-
 #if VERVOSE_MODE
 	if(mpi.isMaster()) print_with_prefix("Time of initialize memory: %f ms", (MPI_Wtime() - prev_time) * 1000.0);
 	prev_time = MPI_Wtime();
@@ -2685,7 +2753,13 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred)
 	forward_or_backward_ = next_forward_or_backward;
 	bitmap_or_list_ = next_bitmap_or_list;
 	growing_or_shrinking_ = true;
+#ifdef PROFILE_REGIONS
+    timer_start(TD_TIME);
+#endif
 	first_expand(root);
+#ifdef PROFILE_REGIONS
+    timer_stop(TD_TIME);
+#endif
 
 #if VERVOSE_MODE
 	tmp = MPI_Wtime();
@@ -2700,6 +2774,10 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred)
 #endif
 
 	while(true) {
+#ifdef PROFILE_REGIONS
+	  current_expand = (forward_or_backward_)? TD_EXPAND_TIME : BU_EXPAND_TIME;
+	  current_fold   = (forward_or_backward_)? TD_FOLD_TIME   : BU_FOLD_TIME;
+#endif
 		++current_level_;
 #if VERVOSE_MODE
 		num_edge_top_down_ = 0;
@@ -2718,22 +2796,33 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred)
 
 		forward_or_backward_ = next_forward_or_backward;
 		bitmap_or_list_ = next_bitmap_or_list;
-
+		
+#ifdef PROFILE_REGIONS
+		if(forward_or_backward_)
+          timer_start(TD_TIME);
+		else
+		  timer_start(BU_TIME);
+#endif
 		if(forward_or_backward_) { // forward
-			top_down_search();
-			// release extra buffer
-			if(work_extra_buf_ != NULL) { free(work_extra_buf_); work_extra_buf_ = NULL; }
+		  top_down_search();
+		  // release extra buffer
+		  if(work_extra_buf_ != NULL) { free(work_extra_buf_); work_extra_buf_ = NULL; }
 		}
 		else { // backward
-			swap_visited_memory(prev_bitmap_or_list);
-			if(bitmap_or_list_) { // bitmap
-				bottom_up_search_bitmap();
-			}
-			else { // list
-				bottom_up_search_list();
-			}
+		  swap_visited_memory(prev_bitmap_or_list);
+		  if(bitmap_or_list_) { // bitmap
+			bottom_up_search_bitmap();
+		  }
+		  else { // list
+			bottom_up_search_list();
+		  }
 		}
-
+#ifdef PROFILE_REGIONS
+		if(forward_or_backward_)
+          timer_stop(TD_TIME);
+		else
+		  timer_stop(BU_TIME);
+#endif
 		global_visited_vertices += global_nq_size_;
 
 #if VERVOSE_MODE
@@ -2845,13 +2934,13 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred)
 			print_with_prefix("Fold Time: %f ms", cur_fold_time * 1000.0);
 			print_with_prefix("Level Total Time: %f ms", time_of_level * 1000.0);
 
-			print_with_prefix("NQ %"PRId64", 1/ %f, %f %% of global, 1/ %f, %f %% of Unvisited",
+			print_with_prefix("NQ %" PRId64 ", 1/ %f, %f %% of global, 1/ %f, %f %% of Unvisited",
 						global_nq_size_, 1/nq_rate, nq_rate*100, 1/nq_unvis_rate, nq_unvis_rate*100);
-			print_with_prefix("Unvisited %"PRId64", 1/ %f, %f %% of global",
+			print_with_prefix("Unvisited %" PRId64 ", 1/ %f, %f %% of global",
 					global_unvisited_vertices, 1/unvis_rate, unvis_rate*100);
 
 			int64_t edge_relaxed = forward_or_backward_ ? num_edge_top_down_ : num_edge_bottom_up_;
-			print_with_prefix("Edge relax: %"PRId64", %f %%, %f M/s (Level), %f M/s (Fold)",
+			print_with_prefix("Edge relax: %" PRId64 ", %f %%, %f M/s (Level), %f M/s (Fold)",
 					edge_relaxed, (double)edge_relaxed / graph_.num_global_edges_ * 100.0,
 					to_mega(edge_relaxed) / time_of_level,
 					to_mega(edge_relaxed) / cur_fold_time);
@@ -2886,6 +2975,12 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred)
 		}
 #endif
 		// expand //
+#ifdef PROFILE_REGIONS
+		if(forward_or_backward_)
+		  timer_start(TD_TIME);
+		else
+		  timer_start(BU_TIME);
+#endif
 		if(next_forward_or_backward == forward_or_backward_) {
 			if(forward_or_backward_)
 				top_down_expand();
@@ -2898,6 +2993,12 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred)
 				bottom_up_switch_expand(next_bitmap_or_list);
 		}
 		clear_nq_stack(); // currently, this is required only in the top-down phase
+#ifdef PROFILE_REGIONS
+		if(forward_or_backward_)
+		  timer_stop(TD_TIME);
+		else
+		  timer_stop(BU_TIME);
+#endif
 
 #if ENABLE_FUJI_PROF
 		stop_collection("expand");

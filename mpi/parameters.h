@@ -19,7 +19,7 @@
 // 0: MPI is single mode: Main -> MPI, Sub: OpenMP
 // 1: MPI is funneled mode: Main -> OpenMP, Sub: MPI
 // Since communication and computation is overlapped, we cannot have main thread do both tasks.
-#define MPI_FUNNELED 0
+#define MPI_FUNNELED 1
 #define OPENMP_SUB_THREAD 0
 
 // Validation Level: 0: No validation, 1: validate at first time only, 2: validate all results
@@ -31,23 +31,27 @@
 #ifndef VERVOSE_MODE
 #define VERVOSE_MODE 1
 #endif
-#define PROFILING_MODE 1
+#define PROFILING_MODE 0
 #define REPORT_GEN_RPGRESS 0
 
 // General Optimizations
 // 0: completely off, 1: only reduce isolated vertices, 2: sort by degree and reduce isolated vertices
 #ifndef VERTEX_REORDERING
-#define VERTEX_REORDERING 0
+#define VERTEX_REORDERING 2
 #endif
 // 0: put all edges to temporally buffer, 1: count first, 2: hybrid
 #define TOP_DOWN_SEND_LB 2
 #define TOP_DOWN_RECV_LB 1
 #define BOTTOM_UP_OVERLAP_PFS 1
 
+// for Fugaku
+#define ENABLE_UTOFU 1
+#define FUGAKU_MPI_PRINT_STATS 1
+
 // for K computer
 #define ENABLE_FJMPI_RDMA 0
 // 0: disable, 1: 1D, 2: 2D
-#define ENABLE_MY_ALLGATHER 1
+#define ENABLE_MY_ALLGATHER 0
 #define ENABLE_INLINE_ATOMICS 0
 #define ENABLE_FUJI_PROF 0
 
@@ -78,13 +82,15 @@
 // But this is not true in the general case. BFS may generate wrong answer in some situation.
 #define INIT_PRED_ONCE 0
 
-#define PRE_EXEC_TIME 0 // 300 seconds
+#define PRE_EXEC_TIME 600 // 0 or 600 seconds
 
 #define BACKTRACE_ON_SIGNAL 0
 #define PRINT_BT_SIGNAL SIGTRAP
 
 // org = 1000
-#define DENOM_TOPDOWN_TO_BOTTOMUP 2000.0
+//#define DENOM_TOPDOWN_TO_BOTTOMUP 2000.0
+#define DENOM_TOPDOWN_TO_BOTTOMUP 15000.0
+//#define DENOM_TOPDOWN_TO_BOTTOMUP  20000.0
 #define DEMON_BOTTOMUP_TO_TOPDOWN 8.0
 #define DENOM_BITMAP_TO_LIST 2.0 // temp
 
@@ -108,7 +114,12 @@
 #define SGI_OMPLACE_BUG 0
 
 #ifdef __FUJITSU
-#	define ENABLE_FJMPI 1
+
+#define LOW_LEVEL_FUNCTION 1
+#define STREAM_UPDATE 1
+
+//#	define ENABLE_FJMPI 1
+#     define ENABLE_FJMPI 0
 #else // #ifdef __FUJITSU
 #	define ENABLE_FJMPI 0
 #	undef ENABLE_FUJI_PROF
@@ -134,10 +145,13 @@
 #	undef OPENMP_SUB_THREAD
 #	define OPENMP_SUB_THREAD 0
 #endif
-
+#ifdef __FUJITSU
+#define CACHE_LINE 256
+#define PAGE_SIZE 65536
+#else
 #define CACHE_LINE 128
 #define PAGE_SIZE 8192
-//#define PAGE_SIZE 16
+#endif
 
 //#define IMD_OUT get_imd_out_file()
 #define IMD_OUT stderr

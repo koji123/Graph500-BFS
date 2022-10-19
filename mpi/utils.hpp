@@ -25,7 +25,9 @@
 #if BACKTRACE_ON_SIGNAL
 #include <signal.h>
 #endif
-#if ENABLE_FJMPI
+#if ENABLE_UTOFU
+#include <mpi-ext.h>
+#elif FUGAKU_MPI_PRINT_STATS
 #include <mpi-ext.h>
 #endif
 
@@ -329,7 +331,7 @@ void* xMPI_Alloc_mem(size_t nbytes) {
   void* p = NULL;
   MPI_Alloc_mem(nbytes, MPI_INFO_NULL, &p);
   if (nbytes != 0 && !p) {
-	  throw_exception("MPI_Alloc_mem failed for size%zu (%"PRId64") byte(s)", nbytes, (int64_t)nbytes);
+	  throw_exception("MPI_Alloc_mem failed for size%zu (%" PRId64 ") byte(s)", nbytes, (int64_t)nbytes);
   }
 #if VERVOSE_MODE
   if(mpi.isMaster() && nbytes > 1024*1024) {
@@ -342,7 +344,7 @@ void* xMPI_Alloc_mem(size_t nbytes) {
 void* cache_aligned_xcalloc(const size_t size) {
     void* p = NULL;
 	if(posix_memalign(&p, CACHE_LINE, size)){
-		throw_exception("Out of memory trying to allocate %zu (%"PRId64") byte(s)", size, (int64_t)size);
+		throw_exception("Out of memory trying to allocate %zu (%" PRId64 ") byte(s)", size, (int64_t)size);
 	}
 	VERVOSE(x_allocate_check(p));
 	memset(p, 0, size);
@@ -351,7 +353,7 @@ void* cache_aligned_xcalloc(const size_t size) {
 void* cache_aligned_xmalloc(const size_t size) {
 	void* p = NULL;
 	if(posix_memalign(&p, CACHE_LINE, size)){
-		throw_exception("Out of memory trying to allocate %zu (%"PRId64") byte(s)", size, (int64_t)size);
+		throw_exception("Out of memory trying to allocate %zu (%" PRId64 ") byte(s)", size, (int64_t)size);
 	}
 	VERVOSE(x_allocate_check(p));
 	return p;
@@ -360,7 +362,7 @@ void* cache_aligned_xmalloc(const size_t size) {
 void* page_aligned_xcalloc(const size_t size) {
 	void* p = NULL;
 	if(posix_memalign(&p, PAGE_SIZE, size)){
-		throw_exception("Out of memory trying to allocate %zu (%"PRId64") byte(s)", size, (int64_t)size);
+		throw_exception("Out of memory trying to allocate %zu (%" PRId64 ") byte(s)", size, (int64_t)size);
 	}
 	VERVOSE(x_allocate_check(p));
 	memset(p, 0, size);
@@ -369,7 +371,7 @@ void* page_aligned_xcalloc(const size_t size) {
 void* page_aligned_xmalloc(const size_t size) {
 	void* p = NULL;
 	if(posix_memalign(&p, PAGE_SIZE, size)){
-		throw_exception("Out of memory trying to allocate %zu (%"PRId64") byte(s)", size, (int64_t)size);
+		throw_exception("Out of memory trying to allocate %zu (%" PRId64 ") byte(s)", size, (int64_t)size);
 	}
 	VERVOSE(x_allocate_check(p));
 	return p;
@@ -1333,7 +1335,7 @@ static void setup_rank_map(COMM_2D& comm) {
 	}
 }
 
-#if ENABLE_FJMPI
+#if ENABLE_UTOFU
 static void parse_row_dims(bool* rdim, const char* input) {
 	memset(rdim, 0x00, sizeof(bool)*6);
 	while(*input) {
@@ -1375,12 +1377,13 @@ static void setup_2dcomm()
 	bool success = false;
 	mpi.isMultiDimAvailable = false;
 
-#if ENABLE_FJMPI
-	const char* tofu_6d = getenv("TOFU_6D");
+#if ENABLE_UTOFU
+	const char* tofu_6d = getenv("TOFU_6D");  // R-axis. e.g. TOFU_6D=yz
 	if(!success && tofu_6d) {
 		int rank6d[6];
 		int size6d[6];
-		FJMPI_Topology_rel_rank2xyzabc(mpi.rank, &rank6d[0], &rank6d[1], &rank6d[2], &rank6d[3], &rank6d[4], &rank6d[5]);
+		// FJMPI_Topology_rel_rank2xyzabc(mpi.rank, &rank6d[0], &rank6d[1], &rank6d[2], &rank6d[3], &rank6d[4], &rank6d[5]);
+		FJMPI_Topology_get_coords(MPI_COMM_WORLD, mpi.rank, FJMPI_TOFU_REL, 6, rank6d);
 		MPI_Allreduce(rank6d, size6d, 6, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
 		int total = 1;
 		for(int i = 0; i < 6; ++i) {
@@ -1388,7 +1391,9 @@ static void setup_2dcomm()
 		}
 		if(mpi.isMaster()) print_with_prefix("Detected dimension %dx%dx%dx%dx%dx%d = %d", size6d[0], size6d[1], size6d[2], size6d[3], size6d[4], size6d[5], mpi.size);
 		if(total != mpi.size) {
-			if(mpi.isMaster()) print_with_prefix("Mismatch error!");
+			if(mpi.isMaster()) print_with_prefix("TOFU_6D Mismatch error!");
+			MPI_Finalize();
+			exit(0);
 		}
 		else {
 			bool rdim[6] = {0};
@@ -1405,6 +1410,20 @@ static void setup_2dcomm()
 					rs_c.push_back(rank6d[i]);
 				}
 			}
+
+			if(ss_r.size() != 1 && ss_r.back() != 1 && ss_r.back()%2 != 0){
+			  if(mpi.isMaster())
+				print_with_prefix("Last dimension of R must be multiple of 2. But it is %d.\n", ss_r.back());
+			  MPI_Finalize();
+			  exit(1);
+			}
+			else if(ss_c.size() != 1 && ss_c.back() != 1 && ss_c.back()%2 != 0){
+			  if(mpi.isMaster())
+				print_with_prefix("Last dimension of C must be multiple of 2. But it is %d,\n", ss_c.back());
+			  MPI_Finalize();
+			  exit(1);
+			}
+			  
 			compute_rank(ss_c, rs_c, mpi.comm_r);
 			if(mpi.isMaster()) print_dims("R: ", ss_r);
 			compute_rank(ss_r, rs_r, mpi.comm_c);
@@ -1422,8 +1441,52 @@ static void setup_2dcomm()
 			success = true;
 		}
 	}
-#endif // #if ENABLE_FJMPI
 
+	const char* tofu_3d_div_y = getenv("TOFU_3D_DIV_Y"); // Number of divisions for Y axis. e.g. When TOFU_3D_DIV_Y=4, (R x C) = (Z*4, X*Y/4)
+	if(!success && tofu_3d_div_y) {
+	  int div, size;
+	  sscanf(tofu_3d_div_y, "%d", &div);
+	  FJMPI_Topology_get_dimension(&size);
+	  if(size != 3){
+		if(mpi.isMaster())
+		  print_with_prefix("TOFU_3D_DIV_Y : dimension must be 3\n");
+		MPI_Finalize();
+		exit(1);
+	  }
+	  
+	  int X, Y, Z;
+	  FJMPI_Topology_get_shape(&X, &Y, &Z);
+	  if(Y%div != 0){
+		if(mpi.isMaster())
+		  print_with_prefix("TOFU_3D_DIV_Y : Y must be multiple of %d\n", div);
+		MPI_Finalize();
+		exit(1);
+	  }
+	  else if((Y/div)%2 != 0 && (Y/div) != 1){  // Y/div = 1 is OK because network topology is torus.
+		if(mpi.isMaster())
+		  print_with_prefix("TOFU_3D_DIV_Y : Y must be multiple of 2*%d\n", div);
+        MPI_Finalize();
+        exit(1);
+      }
+
+	  int DY = Y / div;
+	  mpi.comm_c.size = mpi.size_2dr = Z * div;
+	  mpi.comm_r.size = mpi.size_2dc = X * DY;
+	  if(mpi.isMaster())
+		print_with_prefix("Dimension (R x C) = %d x %d is mapped to (X x Y x Z) = %d x %d x %d\n", mpi.size_2dr, mpi.size_2dc, X, Y, Z);
+
+	  int x  = mpi.rank % X;
+	  int y  = (mpi.rank % (X*Y)) / X;
+	  mpi.comm_c.rank = mpi.rank_2dr = mpi.rank/(X*Y) + (mpi.rank%(X*Y))/(X*DY) * Z;
+	  if(x == 0 && y%DY == 0) mpi.comm_r.rank = mpi.rank_2dc = 0;
+	  else if(x == 0)         mpi.comm_r.rank = mpi.rank_2dc = X * DY - (y%DY);
+	  else if((y%DY)%2 == 0)  mpi.comm_r.rank = mpi.rank_2dc = (X-1) * (y%DY) + x;
+	  else	      	          mpi.comm_r.rank = mpi.rank_2dc = (X-1) * (y%DY) + (X-x);
+	  
+	  success = true;
+	}
+#endif // #if ENABLE_UTOFU
+	
 	const char* virt_4d = getenv("VIRT_4D");
 	if(!success && virt_4d) {
 		int RX, RY, CX, CY;
@@ -1490,7 +1553,7 @@ static void setup_2dcomm()
 		mpi.comm_r.rank = mpi.rank_2dc = mpi.rank / mpi.size_2dr;
 	}
 
-	if(mpi.isMaster()) print_with_prefix("Dimension: (%dx%d)", mpi.size_2dr, mpi.size_2dc);
+	if(mpi.isMaster()) print_with_prefix("Dimension: (R x C) = (%dx%d)", mpi.size_2dr, mpi.size_2dc);
 
 	mpi.isRowMajor = false;
 	if(getenv("INVERT_RC")) {
@@ -1974,11 +2037,12 @@ public:
 	}
 	T sum(T* base_offset = NULL) {
 		const int width = buffer_width_;
+		const int max_threads = omp_get_max_threads();
 		// compute sum of thread local count values
 #pragma omp parallel for
 		for(int r = 0; r < num_partitions_; ++r) {
 			int sum = 0;
-			for(int t = 0; t < max_threads_; ++t) {
+			for(int t = 0; t < max_threads; ++t) {
 				sum += thread_counts_[t*width + r];
 			}
 			partition_size_[r] = sum;
@@ -1990,10 +2054,11 @@ public:
 				partition_offsets_[r] = base_offset[r];
 				base_offset[r] += partition_size_[r];
 			}
+
 #pragma omp parallel for
 			for(int r = 0; r < num_partitions_; ++r) {
 				thread_offsets_[0*width + r] = partition_offsets_[r];
-				for(int t = 0; t < max_threads_; ++t) {
+				for(int t = 0; t < max_threads; ++t) {
 					thread_offsets_[(t+1)*width + r] = thread_offsets_[t*width + r] + thread_counts_[t*width + r];
 				}
 			}
@@ -2009,7 +2074,7 @@ public:
 	#pragma omp parallel for
 			for(int r = 0; r < num_partitions_; ++r) {
 				thread_offsets_[0*width + r] = partition_offsets_[r];
-				for(int t = 0; t < max_threads_; ++t) {
+				for(int t = 0; t < max_threads; ++t) {
 					thread_offsets_[(t+1)*width + r] = thread_offsets_[t*width + r] + thread_counts_[t*width + r];
 				}
 				assert (thread_offsets_[max_threads_*width + r] == partition_offsets_[r + 1]);
@@ -2091,11 +2156,12 @@ public:
 
 	void sum() {
 		const int width = buffer_width_;
+		const int max_threads = omp_get_max_threads();
 		// compute sum of thread local count values
 #pragma omp parallel for if(comm_size_ > 1000)
 		for(int r = 0; r < comm_size_; ++r) {
 			int sum = 0;
-			for(int t = 0; t < max_threads_; ++t) {
+			for(int t = 0; t < max_threads; ++t) {
 				sum += thread_counts_[t*width + r];
 			}
 			send_counts_[r] = sum;
@@ -2110,7 +2176,7 @@ public:
 #pragma omp parallel for if(comm_size_ > 1000)
 		for(int r = 0; r < comm_size_; ++r) {
 			thread_offsets_[0*width + r] = send_offsets_[r];
-			for(int t = 0; t < max_threads_; ++t) {
+			for(int t = 0; t < max_threads; ++t) {
 				thread_offsets_[(t+1)*width + r] = thread_offsets_[t*width + r] + thread_counts_[t*width + r];
 			}
 			assert (thread_offsets_[max_threads_*width + r] == send_offsets_[r + 1]);
@@ -2821,7 +2887,7 @@ public:
 		out_len = max_size;
 		head = sizeof(uint32_t);
 		tail = max_size - sizeof(PacketIndex);
-		outbuf = output;
+		outbuf = (uint8_t*)output;
 
 		assert ((max_size % sizeof(uint32_t)) == 0);
 		const int max_threads = omp_get_max_threads();
@@ -3215,7 +3281,7 @@ struct SpinBarrier {
 		step = cnt = 0;
 		max = num_threads;
 	}
-	void barrier() {
+  void barrier() {
 		int cur_step = step;
 		int wait_cnt = __sync_add_and_fetch(&cnt, 1);
 		assert (wait_cnt <= max);
@@ -3706,5 +3772,26 @@ int64_t pf_nedge[] = {
 	0, // 41
 	0 // 42
 };
-
 #endif /* UTILS_IMPL_HPP_ */
+
+#ifdef PROFILE_REGIONS
+#define NUM_RESIONS    11
+#define TD_TIME         0
+#define BU_TIME         1
+#define TD_EXPAND_TIME  2
+#define BU_EXPAND_TIME  3
+#define TD_FOLD_TIME    4
+#define BU_FOLD_TIME    5
+#define BU_NBR_TIME     6
+#define TOTAL_TIME      7
+#define CALC_TIME       8
+#define IMBALANCE_TIME  9
+#define OTHER_TIME     10
+#define CAT(t) t_max[t], t_min[t], t_ave[t], t_ave[t]/t_ave[TOTAL_TIME]*100
+extern void timer_clear();
+extern void timer_start(const int n);
+extern void timer_stop(const int n);
+extern double timer_read(const int n);
+extern void timer_print(double *, const int);
+#endif
+
