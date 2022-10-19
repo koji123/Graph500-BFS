@@ -7,10 +7,11 @@ SCOREP = false
 LDFLAGS := -fopenmp -g # -pg
 NVCCFLAGS := -Drestrict=__restrict__ -Xcompiler -fopenmp,-ffast-math,-Wall -arch=compute_20 -code=sm_20
 
+#FUGAKU_POWER_MEASUREMENT=false
 FUGAKU_POWER_MEASUREMENT=true
 VERBOSE = false
 VERTEX_REORDERING = 2
-REAL_BENCHMARK = true
+REAL_BENCHMARK = false
 ifeq ($(VERBOSE), false)
 VERBOSE_OPT = -DVERVOSE_MODE=0
 else
