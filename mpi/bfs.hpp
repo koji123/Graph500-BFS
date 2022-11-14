@@ -22,7 +22,6 @@ int current_fold = TD_FOLD_TIME;
 #include "fiber.hpp"
 #include "abstract_comm.hpp"
 #include "mpi_comm.hpp"
-#include "fjmpi_comm.hpp"
 #include "bottom_up_comm.hpp"
 
 #include "low_level_func.h"
@@ -2585,7 +2584,6 @@ public:
 		PRINT_VAL("%d", PROFILING_MODE);
 		PRINT_VAL("%d", DEBUG_PRINT);
 		PRINT_VAL("%d", REPORT_GEN_RPGRESS);
-		PRINT_VAL("%d", ENABLE_FJMPI_RDMA);
 		PRINT_VAL("%d", ENABLE_FUJI_PROF);
 		PRINT_VAL("%d", ENABLE_MY_ALLGATHER);
 		PRINT_VAL("%d", ENABLE_INLINE_ATOMICS);

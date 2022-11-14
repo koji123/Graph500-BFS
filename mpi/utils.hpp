@@ -1645,9 +1645,6 @@ void setup_globals(int argc, char** argv, int SCALE, int edgefactor)
 	MPI_Init_thread(&argc, &argv, reqeust_level, &mpi.thread_level);
 	MPI_Comm_rank(MPI_COMM_WORLD, &mpi.rank);
 	MPI_Comm_size(MPI_COMM_WORLD, &mpi.size);
-#if ENABLE_FJMPI_RDMA
-	FJMPI_Rdma_init();
-#endif
 #if PRINT_WITH_TIME
 	global_clock.init();
 #endif
@@ -1792,9 +1789,6 @@ void cleanup_globals()
 #endif
 #if BACKTRACE_ON_SIGNAL
 	backtrace::thread_join();
-#endif
-#if ENABLE_FJMPI_RDMA
-	FJMPI_Rdma_finalize();
 #endif
 	MPI_Finalize();
 }

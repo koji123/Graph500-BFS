@@ -30,7 +30,6 @@
 #include "fiber.hpp"
 #include "abstract_comm.hpp"
 #include "mpi_comm.hpp"
-#include "fjmpi_comm.hpp"
 
 enum { BUF_SIZE = 16*1024 };
 
@@ -102,9 +101,6 @@ void* time_bomp(void*) {
 
 int main(int argc, char **argv) {
 	MPI_Init(&argc, &argv);
-#if ENABLE_FJMPI_RDMA
-	FJMPI_Rdma_init();
-#endif
 	MPI_Comm_size(MPI_COMM_WORLD, &mpi.size_);
 	MPI_Comm_rank(MPI_COMM_WORLD, &mpi.rank);
 	double start = MPI_Wtime();
@@ -151,9 +147,6 @@ int main(int argc, char **argv) {
 		printf("[r:%d] finished. %f ms, %f ms\n", mpi.rank, (s2-s1)*1000, (s3-s2)*1000);
 	}
 
-#if ENABLE_FJMPI_RDMA
-	FJMPI_Rdma_finalize();
-#endif
 	MPI_Finalize();
 	return 0;
 }
