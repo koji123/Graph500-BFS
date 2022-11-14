@@ -1049,8 +1049,6 @@ public:
 						BitmapType cq_bit = bit_flags & (-bit_flags);
 						BitmapType low_mask = cq_bit - 1;
 						bit_flags &= ~cq_bit;
-						int bit_idx = __builtin_popcountl(low_mask);
-						TwodVertex compact = word_idx * NBPE + bit_idx;
 						TwodVertex src_c = word_idx / get_bitmap_size_local(); // TODO:
 						TwodVertex non_zero_off = bmp_row_sums + __builtin_popcountl(row_bitmap_i & low_mask);
 						int64_t src_orig =
@@ -1928,7 +1926,6 @@ public:
 				BitmapType vis_bit = bit_flags & (-bit_flags);
 				BitmapType mask = vis_bit - 1;
 				bit_flags &= ~vis_bit;
-				int idx = __builtin_popcountl(mask);
 				TwodVertex non_zero_idx = bmp_row_sums + __builtin_popcountl(row_bmp_i & mask);
 				LocalVertex tgt_orig = orig_vertexes[non_zero_idx];
 				// short cut
@@ -2049,7 +2046,6 @@ public:
 #pragma omp barrier
 #endif
 		int tid = omp_get_thread_num();
-		int num_threads = omp_get_num_threads();
 
 #if 1 // dynamic partitioning
 		int visited_count = 0;
