@@ -245,7 +245,7 @@ void graph500_bfs(int SCALE, int edgefactor)
 #endif
 
 #if FUGAKU_MPI_PRINT_STATS
-	FJMPI_Collection_print("Communication Statistics\n");
+        FJMPI_Collection_print(const_cast<char *>("Communication Statistics\n"));
 #endif
 
 	delete benchmark;
