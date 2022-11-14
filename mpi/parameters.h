@@ -45,8 +45,8 @@
 #define BOTTOM_UP_OVERLAP_PFS 1
 
 // for Fugaku
-#define ENABLE_UTOFU 1
-#define FUGAKU_MPI_PRINT_STATS 1
+#define ENABLE_UTOFU 0
+#define FUGAKU_MPI_PRINT_STATS 0
 
 // 0: disable, 1: 1D, 2: 2D
 #define ENABLE_MY_ALLGATHER 0
@@ -85,10 +85,8 @@
 #define BACKTRACE_ON_SIGNAL 0
 #define PRINT_BT_SIGNAL SIGTRAP
 
-// org = 1000
-//#define DENOM_TOPDOWN_TO_BOTTOMUP 2000.0
-#define DENOM_TOPDOWN_TO_BOTTOMUP 15000.0
-#define DEMON_BOTTOMUP_TO_TOPDOWN 8.0
+#define ALPHA  10.0 // Top-down to Bottom-up
+#define BETA   14.0 // Bootom-up to Top-down
 #define DENOM_BITMAP_TO_LIST 2.0 // temp
 
 #define CUDA_ENABLED 0

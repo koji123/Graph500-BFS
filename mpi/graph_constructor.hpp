@@ -33,6 +33,7 @@ public:
 	, row_sums_(NULL)
 	, has_edge_bitmap_(NULL)
 	, reorder_map_(NULL)
+        , degree_(NULL)
 	, orig_vertexes_(NULL)
 	, edge_array_(NULL)
 	, row_starts_(NULL)
@@ -53,6 +54,7 @@ public:
 		free(row_bitmap_); row_bitmap_ = NULL;
 		free(row_sums_); row_sums_ = NULL;
 		free(reorder_map_); reorder_map_ = NULL;
+                free(degree_); degree_ = NULL;
 		free(invert_map_); invert_map_ = NULL;
 		MPI_Free_mem(orig_vertexes_); orig_vertexes_ = NULL;
 		free(has_edge_bitmap_); has_edge_bitmap_ = NULL;
@@ -121,6 +123,7 @@ public:
 	TwodVertex* row_sums_; // Index: SBI
 	BitmapType* has_edge_bitmap_; // for every local vertices, Index: SBI
 	LocalVertex* reorder_map_; // Index: Pred
+        int64_t* degree_;
 	LocalVertex* invert_map_; // Index: Reordered Pred
 	LocalVertex* orig_vertexes_; // Index: CSI
 
@@ -163,7 +166,8 @@ enum {
 struct GraphConstructionData {
 	int64_t num_local_verts_;
 
-	LocalVertex* reordre_map_;
+	LocalVertex* reorder_map_;
+        int64_t* degree_;
 	LocalVertex* invert_map_;
 
 	int64_t* wide_row_starts_;
@@ -278,9 +282,11 @@ struct DegreeCalculation {
 	}
 
 	GraphConstructionData process() {
-		LocalVertex* reorder_map = calc_degree();
+                int64_t num_verts = num_orig_local_verts();
+                int64_t *degree = static_cast<int64_t*>(cache_aligned_xcalloc(num_verts*sizeof(int64_t)));
+		LocalVertex* reorder_map = calc_degree(degree);
 		make_construct_data(reorder_map);
-		return gather_data(reorder_map);
+		return gather_data(reorder_map, degree);
 	}
 
 private:
@@ -293,11 +299,10 @@ private:
 		}
 	};
 
-	LocalVertex* calc_degree() {
+	LocalVertex* calc_degree(int64_t* degree) {
 		if(mpi.isMaster()) print_with_prefix("Counting degree.");
 
 		int64_t num_verts = num_orig_local_verts();
-		int64_t* degree = static_cast<int64_t*>(cache_aligned_xcalloc(num_verts*sizeof(int64_t)));
 		vertexes_ = static_cast<LocalVertex*>(cache_aligned_xcalloc(num_verts*sizeof(LocalVertex)));
 
 #pragma omp parallel for
@@ -338,17 +343,15 @@ private:
 		if(mpi.isMaster()) print_with_prefix("Max local vertex %f M / %f M = %f %%",
 				to_mega(max_local_verts_), to_mega(num_verts), (double)max_local_verts_ / num_verts * 100.0);
 
-		free(degree); degree = NULL;
-
 		// store mapping to degree
-		LocalVertex* reorde_map = static_cast<LocalVertex*>(
+		LocalVertex* reorder_map = static_cast<LocalVertex*>(
 				cache_aligned_xcalloc(num_verts*sizeof(LocalVertex)));
 #pragma omp parallel for
 		for(int64_t i = 0; i < num_verts; ++i) {
-			reorde_map[vertexes_[i]] = int(i);
+			reorder_map[vertexes_[i]] = int(i);
 		}
 
-		return reorde_map;
+		return reorder_map;
 	}
 
 	void make_construct_data(LocalVertex* reorder_map) {
@@ -373,13 +376,13 @@ private:
 					{
 						int c = edge.c;
 						TwodVertex local = r * BLOCK_SIZE + edge.src_vertex;
-						LocalVertex reordred = reorder_map[local];
+						LocalVertex reordered = reorder_map[local];
 
-						int64_t wide_row_offset = local_wide_row_size() * c + (reordred >> LOG_EDGE_PART_SIZE);
+						int64_t wide_row_offset = local_wide_row_size() * c + (reordered >> LOG_EDGE_PART_SIZE);
 						counts[wide_row_offset]++;
 
-						BitmapType& bitmap_v = row_bitmap_[local_bitmap_size() * c + reordred / NBPE];
-						BitmapType add_mask = BitmapType(1) << (reordred % NBPE);
+						BitmapType& bitmap_v = row_bitmap_[local_bitmap_size() * c + reordered / NBPE];
+						BitmapType add_mask = BitmapType(1) << (reordered % NBPE);
 						if((bitmap_v & add_mask) == 0) {
 							__sync_fetch_and_or(&bitmap_v, add_mask);
 						}
@@ -444,22 +447,23 @@ private:
 					if(row_bitmap_[word_idx] & mask) {
 						BitmapType word = row_bitmap_[word_idx] & (mask - 1);
 						TwodVertex offset = __builtin_popcountl(word) + row_sums_[word_idx];
-						TwodVertex reordred = i * NBPE + bit_idx;
-						orig_vertexes_[offset] = vertexes_[reordred];
+						TwodVertex reordered = i * NBPE + bit_idx;
+						orig_vertexes_[offset] = vertexes_[reordered];
 					}
 				}
 			}
 		}
 	}
 
-	GraphConstructionData gather_data(LocalVertex* reorder_map) {
+  GraphConstructionData gather_data(LocalVertex* reorder_map, int64_t *degree) {
 		GraphConstructionData data = {0};
 
 		int64_t num_wide_rows_ = local_wide_row_size() * mpi.size_2dc;
 		int64_t src_bitmap_size = local_bitmap_size() * mpi.size_2dc;
 
 		data.num_local_verts_ = max_local_verts_;
-		data.reordre_map_ = reorder_map;
+		data.reorder_map_ = reorder_map;
+                data.degree_ = degree;
 		data.invert_map_ = vertexes_;
 
 		// allocate memory
@@ -640,7 +644,8 @@ private:
 		// count degree
 		GraphConstructionData data = degree_calc_->process();
 
-		g.reorder_map_ = data.reordre_map_;
+		g.reorder_map_ = data.reorder_map_;
+                g.degree_ = data.degree_;
 		g.invert_map_ = data.invert_map_;
 		g.num_local_verts_ = data.num_local_verts_;
 		local_bits_ = g.local_bits_ = get_msb_index(g.num_local_verts_ - 1) + 1;
@@ -1435,7 +1440,7 @@ private:
 
 		 int64_t num_edge_sum[2] = {0};
 		 int64_t num_edge[2] = {old_num_edges, rowstart_new};
-		MPI_Reduce(num_edge, num_edge_sum, 2, MPI_INT64_T, MPI_SUM, 0, mpi.comm_2d);
+                 MPI_Allreduce(num_edge, num_edge_sum, 2, MPI_INT64_T, MPI_SUM, mpi.comm_2d);
 		if(mpi.isMaster()) print_with_prefix("# of edges is reduced. Total %zd -> %zd Diff %f %%",
 				num_edge_sum[0], num_edge_sum[1], (double)(num_edge_sum[0] - num_edge_sum[1])/(double)num_edge_sum[0]*100.0);
 		g.num_global_edges_ = num_edge_sum[1];

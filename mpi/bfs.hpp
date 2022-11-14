@@ -89,7 +89,6 @@ public:
 		, bottom_up_comm_(this)
 		, td_comm_(mpi.comm_2dc, &top_down_comm_)
 		, bu_comm_(mpi.comm_2dr, &bottom_up_comm_)
-		, denom_to_bottom_up_(DENOM_TOPDOWN_TO_BOTTOMUP)
 		, denom_bitmap_to_list_(DENOM_BITMAP_TO_LIST)
 	{
 	}
@@ -117,7 +116,7 @@ public:
 		allocate_memory();
 	}
 
-	void run_bfs(int64_t root, int64_t* pred);
+        void run_bfs(int64_t root, int64_t* pred, const int edgefactor);
 
 	void get_pred(int64_t* pred) {
 	//	comm_.release_extra_buffer();
@@ -1191,6 +1190,22 @@ public:
 			tlb->cur_buffer = NULL;
 		}
 
+                global_nq_edges_ = 0;
+
+                // Caclulate number of edges in frontier
+                for(int i=0;i<(int)nq_.stack_.size();i++)
+#pragma omp parallel for reduction(+:global_nq_edges_) if(nq_.stack_[i]->length > 500)
+                  for(int j=0;j<nq_.stack_[i]->length;j++)
+                    global_nq_edges_ += graph_.degree_[nq_.stack_[i]->v[j]];
+
+                //  printf("%d\n", (int)global_nq_edges_);
+                //  for(int i=0;i<(int)nq_.stack_.size();i++){
+                //    for(int j=0;j<nq_.stack_[i]->length;j++){
+                //      int v = nq_.stack_[i]->v[j];
+                //      printf("degree[%d] = %d\n", graph_.orig_vertexes_[v], (int)graph_.degree_[v]);
+                //    }
+                //  }
+
 		int64_t send_nq_size = nq_size_;
 		PROF(seq_proc_time_ += tk_all);
 		PROF(MPI_Barrier(mpi.comm_2d));
@@ -1201,7 +1216,10 @@ public:
 		timer_stop(IMBALANCE_TIME);
 #endif
 		MPI_Allreduce(&nq_size_, &max_nq_size_, 1, MPI_INT, MPI_MAX, mpi.comm_2d);
-		MPI_Allreduce(&send_nq_size, &global_nq_size_, 1, MpiTypeOf<int64_t>::type, MPI_SUM, mpi.comm_2d);
+                int64_t tmp[2] = {send_nq_size, global_nq_edges_};
+                MPI_Allreduce(MPI_IN_PLACE, tmp, 2, MpiTypeOf<int64_t>::type, MPI_SUM, mpi.comm_2d);
+                global_nq_size_  = tmp[0];
+                global_nq_edges_ = tmp[1];
 		PROF(gather_nq_time_ += tk_all);
 	}
 
@@ -2612,8 +2630,8 @@ public:
 		PRINT_VAL("%d", BOTTOM_UP_BUFFER);
 		PRINT_VAL("%d", NBPE);
 		PRINT_VAL("%d", BFELL_SORT);
-		PRINT_VAL("%f", DENOM_TOPDOWN_TO_BOTTOMUP);
-		PRINT_VAL("%f", DEMON_BOTTOMUP_TO_TOPDOWN);
+		PRINT_VAL("%f", ALPHA);
+		PRINT_VAL("%f", BETA);
 		PRINT_VAL("%f", DENOM_BITMAP_TO_LIST);
 
 		PRINT_VAL("%d", VALIDATION_LEVEL);
@@ -2651,7 +2669,6 @@ public:
 	memory::ConcurrentStack<QueuedVertexes*> nq_;
 
 	// switch parameters
-	double denom_to_bottom_up_; // alpha
 	double denom_bitmap_to_list_; // gamma
 
 	// cq_list_ is a pointer to work_buf_ or work_extra_buf_
@@ -2659,6 +2676,7 @@ public:
 	TwodVertex cq_size_;
 	int nq_size_;
 	int max_nq_size_;
+        int64_t global_nq_edges_ = 0;
 	int64_t global_nq_size_;
 
 	// size = local bitmap width
@@ -2716,7 +2734,7 @@ public:
 	PROF(profiling::TimeSpan gather_nq_time_);
 };
 
-void BfsBase::run_bfs(int64_t root, int64_t* pred)
+void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor)
 {
 	SET_AFFINITY;
 #if ENABLE_FUJI_PROF
@@ -2883,11 +2901,10 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred)
 		fapp_start("expand", 0, 0);
 		start_collection("expand");
 #endif
-		int64_t global_unvisited_vertices = graph_.num_global_verts_ - global_visited_vertices;
 		next_bitmap_or_list = !forward_or_backward_;
 		if(growing_or_shrinking_ && global_nq_size_ > prev_global_nq_size) { // growing
 			if(forward_or_backward_ // forward ?
-				&& global_nq_size_ > graph_.num_global_verts_ / denom_to_bottom_up_ // NQ is large ?
+                           && global_nq_edges_ > int64_t(graph_.num_global_edges_ / ALPHA)
 				) { // switch to backward
 				next_forward_or_backward = false;
 				packet_buffer_is_dirty_ = true;
@@ -2895,7 +2912,7 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred)
 		}
 		else { // shrinking
 			if(!forward_or_backward_  // backward ?
-				&& global_unvisited_vertices < int64_t(graph_.num_global_verts_ / DEMON_BOTTOMUP_TO_TOPDOWN) // NQ is small ?
+                           && global_nq_size_ < int64_t(graph_.num_global_verts_ / (BETA * edgefactor * 2.0))
 				) { // switch to topdown
 				next_forward_or_backward = true;
 				growing_or_shrinking_ = false;

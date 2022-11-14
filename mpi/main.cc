@@ -131,7 +131,7 @@ void graph500_bfs(int SCALE, int edgefactor)
 		  print_with_prefix("========== Pre Running BFS %d ==========", c);
 		MPI_Barrier(mpi.comm_2d);
 		double bfs_time = MPI_Wtime();
-		benchmark->run_bfs(bfs_roots[c % num_bfs_roots], pred);
+		benchmark->run_bfs(bfs_roots[c % num_bfs_roots], pred, edgefactor);
 		bfs_time = MPI_Wtime() - bfs_time;
 		if(mpi.isMaster()) {
 		  print_with_prefix("Time for BFS %d is %f", c, bfs_time);
@@ -179,7 +179,7 @@ void graph500_bfs(int SCALE, int edgefactor)
 #endif
 		PROF(profiling::g_pis.reset());
 		bfs_times[i] = MPI_Wtime();
-		benchmark->run_bfs(bfs_roots[i], pred);
+		benchmark->run_bfs(bfs_roots[i], pred, edgefactor);
 		bfs_times[i] = MPI_Wtime() - bfs_times[i];
 #if FUGAKU_MPI_PRINT_STATS
                 FJMPI_Collection_stop();
