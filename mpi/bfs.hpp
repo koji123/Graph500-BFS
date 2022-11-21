@@ -116,7 +116,7 @@ public:
 		allocate_memory();
 	}
 
-        void run_bfs(int64_t root, int64_t* pred, const int edgefactor);
+        void run_bfs(int64_t root, int64_t* pred, const int edgefactor, const double alpha, const double beta);
 
 	void get_pred(int64_t* pred) {
 	//	comm_.release_extra_buffer();
@@ -2626,8 +2626,6 @@ public:
 		PRINT_VAL("%d", BOTTOM_UP_BUFFER);
 		PRINT_VAL("%d", NBPE);
 		PRINT_VAL("%d", BFELL_SORT);
-		PRINT_VAL("%f", ALPHA);
-		PRINT_VAL("%f", BETA);
 		PRINT_VAL("%f", DENOM_BITMAP_TO_LIST);
 
 		PRINT_VAL("%d", VALIDATION_LEVEL);
@@ -2730,7 +2728,7 @@ public:
 	PROF(profiling::TimeSpan gather_nq_time_);
 };
 
-void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor)
+void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const double alpha, const double beta)
 {
 	SET_AFFINITY;
 #if ENABLE_FUJI_PROF
@@ -2900,7 +2898,7 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor)
 		next_bitmap_or_list = !forward_or_backward_;
 		if(growing_or_shrinking_ && global_nq_size_ > prev_global_nq_size) { // growing
 			if(forward_or_backward_ // forward ?
-                           && global_nq_edges_ > int64_t(graph_.num_global_edges_ / ALPHA)
+                           && global_nq_edges_ > int64_t(graph_.num_global_edges_ / alpha)
 				) { // switch to backward
 				next_forward_or_backward = false;
 				packet_buffer_is_dirty_ = true;
@@ -2908,7 +2906,7 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor)
 		}
 		else { // shrinking
 			if(!forward_or_backward_  // backward ?
-                           && global_nq_size_ < int64_t(graph_.num_global_verts_ / (BETA * edgefactor * 2.0))
+                           && global_nq_size_ < int64_t(graph_.num_global_verts_ / (beta * edgefactor * 2.0))
 				) { // switch to topdown
 				next_forward_or_backward = true;
 				growing_or_shrinking_ = false;

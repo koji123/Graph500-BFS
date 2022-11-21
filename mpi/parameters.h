@@ -85,8 +85,9 @@
 #define BACKTRACE_ON_SIGNAL 0
 #define PRINT_BT_SIGNAL SIGTRAP
 
-#define ALPHA  10.0 // Top-down to Bottom-up
-#define BETA   14.0 // Bootom-up to Top-down
+#define DEFAULT_EDGE_FACTOR 16
+#define DEFAULT_ALPHA  10.0 // Top-down to Bottom-up
+#define DEFAULT_BETA   14.0 // Bootom-up to Top-down
 #define DENOM_BITMAP_TO_LIST 2.0 // temp
 
 #define CUDA_ENABLED 0

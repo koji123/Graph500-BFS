@@ -34,7 +34,7 @@
 #include "bfs_gpu.hpp"
 #endif
 
-void graph500_bfs(int SCALE, int edgefactor)
+void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta)
 {
 	using namespace PRM;
 	SET_AFFINITY;
@@ -131,7 +131,7 @@ void graph500_bfs(int SCALE, int edgefactor)
 		  print_with_prefix("========== Pre Running BFS %d ==========", c);
 		MPI_Barrier(mpi.comm_2d);
 		double bfs_time = MPI_Wtime();
-		benchmark->run_bfs(bfs_roots[c % num_bfs_roots], pred, edgefactor);
+		benchmark->run_bfs(bfs_roots[c % num_bfs_roots], pred, edgefactor, alpha, beta);
 		bfs_time = MPI_Wtime() - bfs_time;
 		if(mpi.isMaster()) {
 		  print_with_prefix("Time for BFS %d is %f", c, bfs_time);
@@ -179,7 +179,7 @@ void graph500_bfs(int SCALE, int edgefactor)
 #endif
 		PROF(profiling::g_pis.reset());
 		bfs_times[i] = MPI_Wtime();
-		benchmark->run_bfs(bfs_roots[i], pred, edgefactor);
+		benchmark->run_bfs(bfs_roots[i], pred, edgefactor, alpha, beta);
 		bfs_times[i] = MPI_Wtime() - bfs_times[i];
 #if FUGAKU_MPI_PRINT_STATS
                 FJMPI_Collection_stop();
@@ -233,6 +233,8 @@ void graph500_bfs(int SCALE, int edgefactor)
 	  fprintf(stdout, "============= Result ==============\n");
 	  fprintf(stdout, "SCALE:                          %d\n", SCALE);
 	  fprintf(stdout, "edgefactor:                     %d\n", edgefactor);
+          fprintf(stdout, "alpha:                          %f\n", alpha);
+          fprintf(stdout, "beta:                           %f\n", beta);
 	  fprintf(stdout, "NBFS:                           %d\n", num_bfs_roots);
 	  fprintf(stdout, "graph_generation:               %g\n", generation_time);
 	  fprintf(stdout, "num_mpi_processes:              %d\n", mpi.size_2d);
@@ -281,26 +283,54 @@ void test02(int SCALE, int edgefactor)
 }
 #endif
 
+#define ERROR(...) do{fprintf(stderr, __VA_ARGS__); exit(1);}while(0)
+static void print_help(char *argv)
+{
+  ERROR("%s SCALE [-e edge_factor] [-a alpha] [-b beta]\n", argv);
+}
+
+static void set_args(const int argc, char **argv, int *edge_factor, double *alpha, double *beta)
+{
+  int result;
+  while((result = getopt(argc,argv,"e:a:b:"))!=-1){
+    switch(result){
+    case 'e':
+      *edge_factor = atoi(optarg);
+      if(*edge_factor <= 0)
+        ERROR("-e value > 0\n");
+      break;
+    case 'a':
+      *alpha = atof(optarg);
+      if(*alpha <= 0)
+        ERROR("-a value > 0\n");
+      break;
+    case 'b':
+      *beta = atof(optarg);
+      if(*beta <= 0)
+        ERROR("-b value > 0\n");
+      break;
+    default:
+      print_help(argv[0]);
+    }
+  }
+}
+
 int main(int argc, char** argv)
 {
-	// Parse arguments.
-	int SCALE = 16;
-	int edgefactor = 16; // nedges / nvertices, i.e., 2*avg. degree
-	if (argc >= 2) SCALE = atoi(argv[1]);
-	if (argc >= 3) edgefactor = atoi(argv[2]);
-	if (argc <= 1 || argc >= 4 || SCALE == 0 || edgefactor == 0) {
-		fprintf(IMD_OUT, "Usage: %s SCALE edgefactor\n"
-				"SCALE = log_2(# vertices) [integer, required]\n"
-				"edgefactor = (# edges) / (# vertices) = .5 * (average vertex degree) [integer, defaults to 16]\n"
-				"(Random number seed are in main.c)\n",
-				argv[0]);
-		return 0;
-	}
+  if(argc <= 1 || atoi(argv[1]) <= 0)
+    print_help(argv[0]);
+  
+  int scale       = atoi(argv[1]);
+  int edge_factor = DEFAULT_EDGE_FACTOR; // nedges / nvertices, i.e., 2*avg. degree
+  double alpha    = DEFAULT_ALPHA;
+  double beta     = DEFAULT_BETA;
 
-	setup_globals(argc, argv, SCALE, edgefactor);
-	graph500_bfs(SCALE, edgefactor);
-	cleanup_globals();
-	return 0;
+  set_args(argc, argv, &edge_factor, &alpha, &beta);
+  
+  setup_globals(argc, argv, scale, edge_factor);
+  graph500_bfs(scale, edge_factor, alpha, beta);
+  cleanup_globals();
+  return 0;
 }
 
 double elapsed[NUM_RESIONS], start[NUM_RESIONS];
