@@ -62,12 +62,11 @@ mpirun -n 1 -outfile-pattern ./log/lP1T8S16VR0BNONE -genv OMP_NUM_THREADS <nthre
 
 ### make options
 ```sh
-make [VERBOSE=<bool>] [VERTEX_REORDERING=<0|1|2>] [REAL_BENCHMARK=<bool>] cpu
+make [VERBOSE=<bool>] [VERTEX_REORDERING=<0|1|2>] cpu
 ```
 
 * `VERBOSE` : toggle verbose output. true = enable, false = disenable.
 * `VERTEX_REORDERING` : specify vertex reordering mode. 0 = do nothing (default), 1 = only reduce isolated vertices, 2 = sort by degree and reduce isolated vertices.
-* `REAL_BENCHMARK` : change BFS iteration times. true = 64 times, false = 16 times (for testing).
 
 
 ## Benchmarking support script

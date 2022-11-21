@@ -1675,7 +1675,6 @@ void setup_globals(int argc, char** argv, int SCALE, int edgefactor)
 		);
 		print_with_prefix("Running Binary: %s", argv[0]);
 		print_with_prefix("Provided MPI thread mode: %s", prov_str);
-		print_with_prefix("Pre running time will be %d seconds", PRE_EXEC_TIME);
 #if PRINT_WITH_TIME
 		char buf[200];
 		strftime(buf, sizeof(buf), "%Y/%m/%d %A %H:%M:%S %Z", localtime(&global_clock.l.tv_sec));

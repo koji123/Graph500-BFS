@@ -111,8 +111,8 @@ public:
 		constructor.construct(edge_list, log_local_verts_unit, graph_);
 	}
 
-	void prepare_bfs() {
-		printInformation();
+         void prepare_bfs(int validation_level, bool pre_exec, bool real_benchmark) {
+                printInformation(validation_level, pre_exec, real_benchmark);
 		allocate_memory();
 	}
 
@@ -2573,14 +2573,13 @@ public:
 		int src_;
 	};
 
-	static void printInformation()
+  static void printInformation(int validation_level, bool pre_exec, bool real_benchmark)
 	{
 		if(mpi.isMaster() == false) return ;
 		using namespace PRM;
 		print_with_prefix("===== Settings and Parameters. ====");
 
 #define PRINT_VAL(fmt, val) print_with_prefix(#val " = " fmt ".", val)
-		PRINT_VAL("%d", NUM_BFS_ROOTS);
 		PRINT_VAL("%d", omp_get_max_threads());
 		PRINT_VAL("%d", omp_get_nested());
 		PRINT_VAL("%zd", sizeof(BitmapType));
@@ -2614,8 +2613,6 @@ public:
 
 		PRINT_VAL("%d", INIT_PRED_ONCE);
 
-		PRINT_VAL("%d", PRE_EXEC_TIME);
-
 		PRINT_VAL("%d", BACKTRACE_ON_SIGNAL);
 #if BACKTRACE_ON_SIGNAL
 		PRINT_VAL("%d", PRINT_BT_SIGNAL);
@@ -2628,11 +2625,10 @@ public:
 		PRINT_VAL("%d", BFELL_SORT);
 		PRINT_VAL("%f", DENOM_BITMAP_TO_LIST);
 
-		PRINT_VAL("%d", VALIDATION_LEVEL);
+		PRINT_VAL("%d", validation_level);
 		PRINT_VAL("%d", SGI_OMPLACE_BUG);
 #undef PRINT_VAL
-
-		if(NUM_BFS_ROOTS == 64 && VALIDATION_LEVEL == 2)
+                if(real_benchmark)
 			print_with_prefix("===== Benchmark Mode OK ====");
 		else
 			print_with_prefix("===== Non Benchmark Mode ====");

@@ -34,22 +34,23 @@
 #include "bfs_gpu.hpp"
 #endif
 
-void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta)
+void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int validation_level,
+                  bool pre_exec, bool real_benchmark)
 {
 	using namespace PRM;
 	SET_AFFINITY;
 
-	double bfs_times[64], validate_times[64], edge_counts[64];
+        int num_bfs_roots = (real_benchmark)? REAL_BFS_ROOTS : TEST_BFS_ROOTS;
+	double bfs_times[num_bfs_roots], validate_times[num_bfs_roots], edge_counts[num_bfs_roots];
 	LogFileFormat log = {0};
 	int root_start = read_log_file(&log, SCALE, edgefactor, bfs_times, validate_times, edge_counts);
 	if(mpi.isMaster() && root_start != 0)
 		print_with_prefix("Resume from %d th run", root_start);
 
 	EdgeListStorage<UnweightedPackedEdge, 8*1024*1024> edge_list(
-//	EdgeListStorage<UnweightedPackedEdge, 512*1024> edge_list(
 			(int64_t(1) << SCALE) * edgefactor / mpi.size_2d, getenv("TMPFILE"));
 
-	BfsOnCPU::printInformation();
+	BfsOnCPU::printInformation(validation_level, pre_exec, real_benchmark);
 
 	if(mpi.isMaster()) print_with_prefix("Graph generation");
 	double generation_time = MPI_Wtime();
@@ -68,8 +69,7 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta)
 	redistribute_edge_2d(&edge_list);
 	redistribution_time = MPI_Wtime() - redistribution_time;
 
-	int64_t bfs_roots[NUM_BFS_ROOTS];
-	int num_bfs_roots = NUM_BFS_ROOTS;
+	int64_t bfs_roots[num_bfs_roots];
 	find_roots(benchmark->graph_, bfs_roots, num_bfs_roots);
 	const int64_t max_used_vertex = find_max_used_vertex(benchmark->graph_);
 	const int64_t nlocalverts = benchmark->graph_.pred_size();
@@ -89,9 +89,9 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta)
 	if(root_start == 0)
 		init_log(SCALE, edgefactor, generation_time, construction_time, redistribution_time, &log);
 
-	benchmark->prepare_bfs();
+	benchmark->prepare_bfs(validation_level, pre_exec, real_benchmark);
 	
-	if(PRE_EXEC_TIME != 0){
+	if(pre_exec){
 #ifdef _FUGAKU_POWER_MEASUREMENT
 	  PWR_Cntxt cntxt = NULL;
 	  PWR_Obj obj = NULL;
@@ -166,7 +166,6 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta)
 	timer_clear();
 #endif
 	for(int i = root_start; i < num_bfs_roots; ++i) {
-	//for(int i = 0; i < num_bfs_roots; ++i) {
 		VERVOSE(print_max_memory_usage());
 
 		if(mpi.isMaster())  print_with_prefix("========== Running BFS %d ==========", i);
@@ -197,21 +196,22 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta)
 
 		validate_times[i] = MPI_Wtime();
 		int64_t edge_visit_count = 0;
-#if VALIDATION_LEVEL >= 2
-		result_ok = validate_bfs_result(
-					&edge_list, max_used_vertex + 1, nlocalverts, bfs_roots[i], pred, &edge_visit_count);
-#elif VALIDATION_LEVEL == 1
-		if(i == 0) {
-			result_ok = validate_bfs_result(
-						&edge_list, max_used_vertex + 1, nlocalverts, bfs_roots[i], pred, &edge_visit_count);
+                if(validation_level == 2){
+                  result_ok = validate_bfs_result(&edge_list, max_used_vertex + 1, nlocalverts, bfs_roots[i], pred, &edge_visit_count);
+                }
+                else if(validation_level == 1){
+                  if(i == 0) {
+			result_ok = validate_bfs_result(&edge_list, max_used_vertex + 1, nlocalverts, bfs_roots[i], pred, &edge_visit_count);
 			pf_nedge[SCALE] = edge_visit_count;
-		}
-		else {
-			edge_visit_count = pf_nedge[SCALE];
-		}
-#else
-		edge_visit_count = pf_nedge[SCALE];
-#endif
+                  }
+                  else {
+                    edge_visit_count = pf_nedge[SCALE];
+                  }
+                }
+                else{ // validation_level == 0
+                  edge_visit_count = pf_nedge[SCALE];
+                }
+
 		validate_times[i] = MPI_Wtime() - validate_times[i];
 		edge_counts[i] = (double)edge_visit_count;
 
@@ -286,13 +286,16 @@ void test02(int SCALE, int edgefactor)
 #define ERROR(...) do{fprintf(stderr, __VA_ARGS__); exit(1);}while(0)
 static void print_help(char *argv)
 {
-  ERROR("%s SCALE [-e edge_factor] [-a alpha] [-b beta]\n", argv);
+  ERROR("%s SCALE [-e edge_factor] [-a alpha] [-b beta] [-v validation level] [-p pre_exec_time] [-R]\n", argv);
+  // Validation Level: 0: No validation, 1: validate at first time only, 2: validate all results
+  // Note: To conform to the specification, you must set 2
 }
 
-static void set_args(const int argc, char **argv, int *edge_factor, double *alpha, double *beta)
+static void set_args(const int argc, char **argv, int *edge_factor, double *alpha, double *beta,
+                     int *validation_level, bool *pre_exec, bool *real_benchmark)
 {
   int result;
-  while((result = getopt(argc,argv,"e:a:b:"))!=-1){
+  while((result = getopt(argc,argv,"e:a:b:v:PR"))!=-1){
     switch(result){
     case 'e':
       *edge_factor = atoi(optarg);
@@ -309,6 +312,17 @@ static void set_args(const int argc, char **argv, int *edge_factor, double *alph
       if(*beta <= 0)
         ERROR("-b value > 0\n");
       break;
+    case 'v':
+      *validation_level = atoi(optarg);
+      if(*validation_level < 0 || *validation_level > 2)
+        ERROR("-v value >= 0 && value <= 2\n");
+      break;
+    case 'P':
+      *pre_exec = true;
+      break;
+    case 'R':
+      *real_benchmark = true;
+      break;
     default:
       print_help(argv[0]);
     }
@@ -320,15 +334,22 @@ int main(int argc, char** argv)
   if(argc <= 1 || atoi(argv[1]) <= 0)
     print_help(argv[0]);
   
-  int scale       = atoi(argv[1]);
-  int edge_factor = DEFAULT_EDGE_FACTOR; // nedges / nvertices, i.e., 2*avg. degree
-  double alpha    = DEFAULT_ALPHA;
-  double beta     = DEFAULT_BETA;
+  int scale            = atoi(argv[1]);
+  int edge_factor      = DEFAULT_EDGE_FACTOR; // nedges / nvertices, i.e., 2*avg. degree
+  double alpha         = DEFAULT_ALPHA;
+  double beta          = DEFAULT_BETA;
+  int validation_level = DEFAULT_VALIDATION_LEVEL;
+  bool real_benchmark  = false;
+  bool pre_exec        = false;
 
-  set_args(argc, argv, &edge_factor, &alpha, &beta);
+  set_args(argc, argv, &edge_factor, &alpha, &beta, &validation_level, &pre_exec, &real_benchmark);
+  if(real_benchmark){
+    validation_level = 2;
+    pre_exec = true;
+  }
   
   setup_globals(argc, argv, scale, edge_factor);
-  graph500_bfs(scale, edge_factor, alpha, beta);
+  graph500_bfs(scale, edge_factor, alpha, beta, validation_level, pre_exec, real_benchmark);
   cleanup_globals();
   return 0;
 }
