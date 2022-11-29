@@ -41,8 +41,10 @@
 #define BOTTOM_UP_OVERLAP_PFS 1
 
 // for Fugaku
-#define ENABLE_UTOFU 0
-#define FUGAKU_MPI_PRINT_STATS 0
+#ifdef __FUJITSU
+#define ENABLE_UTOFU 1
+#define FUGAKU_MPI_PRINT_STATS 1
+#endif
 
 // 0: disable, 1: 1D, 2: 2D
 #define ENABLE_MY_ALLGATHER 0
@@ -76,7 +78,7 @@
 // But this is not true in the general case. BFS may generate wrong answer in some situation.
 #define INIT_PRED_ONCE 0
 
-#define PRE_EXEC_TIME 1
+#define PRE_EXEC_TIME 300
 #define REAL_BFS_ROOTS 64
 #define TEST_BFS_ROOTS 16
 

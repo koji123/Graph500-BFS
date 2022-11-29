@@ -286,7 +286,7 @@ void test02(int SCALE, int edgefactor)
 #define ERROR(...) do{fprintf(stderr, __VA_ARGS__); exit(1);}while(0)
 static void print_help(char *argv)
 {
-  ERROR("%s SCALE [-e edge_factor] [-a alpha] [-b beta] [-v validation level] [-p pre_exec_time] [-R]\n", argv);
+  ERROR("%s SCALE [-e edge_factor] [-a alpha] [-b beta] [-v validation level] [-P] [-R]\n", argv);
   // Validation Level: 0: No validation, 1: validate at first time only, 2: validate all results
   // Note: To conform to the specification, you must set 2
 }
