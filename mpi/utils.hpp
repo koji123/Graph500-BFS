@@ -168,7 +168,6 @@ struct MPI_GLOBALS {
 
 	// utility method
 	bool isMaster() const { return rank == 0; }
-	bool isRmaster() const { return rank == size-1; }
 	bool isYdimAvailable() const { return comm_y != comm_2dc; }
 };
 
@@ -822,7 +821,7 @@ public:
 		num_cores_assgined = num_cores_within_numa / procs_per_numa_node;
 
 		if(num_cores_within_numa != procs_per_numa_node * num_cores_assgined) {
-			if(mpi.isRmaster()) print_with_prefix("Warning: Core affinity is disabled because we cannot determine the # of cores to assign.");
+			if(mpi.isMaster()) print_with_prefix("Warning: Core affinity is disabled because we cannot determine the # of cores to assign.");
 			disable_affinity = true;
 		}
 	}
@@ -1043,7 +1042,7 @@ bool detect_core_affinity(std::vector<int>& cpu_set) {
 		return false;
 	}
 	if(process_affinity) {
-		if(mpi.isRmaster()) print_with_prefix("Detect process affinity");
+		if(mpi.isMaster()) print_with_prefix("Detect process affinity");
 #pragma omp parallel num_threads(num_omp_threads)
 		internal_set_core_affinity(cpu_set[thread_id]);
 	}
@@ -1052,7 +1051,7 @@ bool detect_core_affinity(std::vector<int>& cpu_set) {
 		if(total_threads > num_omp_threads) {
 			cpu_set[num_omp_threads] = num_omp_threads;
 		}
-		if(mpi.isRmaster()) print_with_prefix("Detect core affinity");
+		if(mpi.isMaster()) print_with_prefix("Detect core affinity");
 	}
 	omp_set_num_threads(num_bfs_threads);
 	return true;
@@ -1131,7 +1130,7 @@ void set_affinity()
 	}
 	else {
 		num_node = mpi.size;
-		if(mpi.isRmaster()) {
+		if(mpi.isMaster()) {
 			print_with_prefix("Warning: failed to get # of node (MPI_NUM_NODE=<# of node>). We assume 1 process per node");
 		}
 	}
@@ -1140,7 +1139,7 @@ void set_affinity()
 	int proc_rank = (dist_round_robin ? (mpi.rank / num_node) : (mpi.rank % max_procs_per_node));
 	g_GpuIndex = proc_rank;
 
-	if(mpi.isRmaster()) {
+	if(mpi.isMaster()) {
 		print_with_prefix("process distribution : %s", dist_round_robin ? "round robin" : "partition");
 	}
 #if SHARED_MEMORY
@@ -1173,7 +1172,7 @@ void set_affinity()
 	if(core_bind != NULL) {
 		affinity_mode = (AffinityMode)atoi(core_bind);
 	}
-	if(mpi.isRmaster()) print_bind_mode();
+	if(mpi.isMaster()) print_bind_mode();
 	if(affinity_mode == USE_EXISTING_AFFINITY) {
 		std::vector<int> cpu_set;
 		if(detect_core_affinity(cpu_set) == false) {
@@ -1182,7 +1181,7 @@ void set_affinity()
 		else {
 			core_affinity_enabled = true;
 			core_binding = new ManualCoreBinding(&cpu_set[0], cpu_set.size());
-			if(mpi.isRmaster()) print_with_prefix("Core affinity is enabled (using existing affinigy)");
+			if(mpi.isMaster()) print_with_prefix("Core affinity is enabled (using existing affinigy)");
 		}
 	}
 	if(affinity_mode == SIMPLE_AFFINITY) {
@@ -1231,7 +1230,7 @@ void set_affinity()
 				// disable core binding
 				delete topology; topology = NULL;
 
-				if(mpi.isRmaster()) { /* print from max rank node for easy debugging */
+				if(mpi.isMaster()) { /* print from max rank node for easy debugging */
 				  print_with_prefix("affinity for executing 3 processed per node is enabled.");
 				}
 			}
@@ -1242,7 +1241,7 @@ void set_affinity()
 				}
 				int NUM_SOCKET = numa_max_node() + 1;
 				if(NUM_SOCKET != topology->num_numa_nodes) {
-					if(mpi.isRmaster()) print_with_prefix("Warning: # of NUMA nodes from the libnuma does not match ours. (libnuma = %d, ours = %d)",
+					if(mpi.isMaster()) print_with_prefix("Warning: # of NUMA nodes from the libnuma does not match ours. (libnuma = %d, ours = %d)",
 							NUM_SOCKET, topology->num_numa_nodes);
 				}
 
@@ -1253,16 +1252,16 @@ void set_affinity()
 				numa_set_preferred(proc_rank % NUM_SOCKET);
 
 				core_affinity_enabled = true;
-				if(mpi.isRmaster()) print_with_prefix("Core affinity is enabled");
+				if(mpi.isMaster()) print_with_prefix("Core affinity is enabled");
 
-				if(mpi.isRmaster()) { /* print from max rank node for easy debugging */
+				if(mpi.isMaster()) { /* print from max rank node for easy debugging */
 				  print_with_prefix("NUMA node affinity is enabled.");
 				}
 			}
 		}
 		// failed to detect CPU topology or there is only one process here
 		else {
-			if(mpi.isRmaster()) { /* print from max rank node for easy debugging */
+			if(mpi.isMaster()) { /* print from max rank node for easy debugging */
 			  print_with_prefix("affinity is disabled.");
 			}
 			cpu_set_t set; CPU_ZERO(&set);
@@ -1709,7 +1708,7 @@ void setup_globals(int argc, char** argv, int SCALE, int edgefactor)
 	MPI_File_set_errhandler(MPI_FILE_NULL, MPI_ERRORS_ARE_FATAL);
 
 #ifdef _OPENMP
-	if(mpi.isRmaster()){
+	if(mpi.isMaster()){
 #if _OPENMP >= 200805
 	  omp_sched_t kind;
 	  int modifier;
