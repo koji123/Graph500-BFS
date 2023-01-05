@@ -2729,7 +2729,6 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const d
 	SET_AFFINITY;
 #if ENABLE_FUJI_PROF
 	fapp_start("initialize", 0, 0);
-	start_collection("initialize");
 #endif
 	TRACER(run_bfs);
 	pred_ = pred;
@@ -2774,9 +2773,8 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const d
 #endif
 
 #if ENABLE_FUJI_PROF
-	stop_collection("initialize");
 	fapp_stop("initialize", 0, 0);
-	char *prof_mes[] = { "bottom-up", "top-down" };
+	char *prof_mes[] = { const_cast<char *>("bottom-up"), const_cast<char *>("top-down") };
 #endif
 
 	while(true) {
@@ -2792,7 +2790,6 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const d
 #endif // #if VERVOSE_MODE
 #if ENABLE_FUJI_PROF
 		fapp_start(prof_mes[(int)forward_or_backward_], 0, 0);
-		start_collection(prof_mes[(int)forward_or_backward_]);
 #endif
 		TRACER(level);
 		// search phase //
@@ -2880,7 +2877,6 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const d
 #endif // #if PROFILING_MODE
 #endif // #if VERVOSE_MODE
 #if ENABLE_FUJI_PROF
-		stop_collection(prof_mes[(int)forward_or_backward_]);
 		fapp_stop(prof_mes[(int)forward_or_backward_], 0, 0);
 #endif
 #if !VERVOSE_MODE
@@ -2889,7 +2885,6 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const d
 #endif
 #if ENABLE_FUJI_PROF
 		fapp_start("expand", 0, 0);
-		start_collection("expand");
 #endif
 		next_bitmap_or_list = !forward_or_backward_;
 		if(growing_or_shrinking_ && global_nq_size_ > prev_global_nq_size) { // growing
@@ -3006,7 +3001,6 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const d
 #endif
 
 #if ENABLE_FUJI_PROF
-		stop_collection("expand");
 		fapp_stop("expand", 0, 0);
 #endif
 #if VERVOSE_MODE

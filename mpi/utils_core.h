@@ -218,8 +218,6 @@ FILE* get_imd_out_file();
 extern "C" {
 void fapp_start(const char *, int , int);
 void fapp_stop(const  char *, int , int);
-void start_collection(const char *);
-void stop_collection(const char *);
 }
 #endif
 
