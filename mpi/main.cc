@@ -261,13 +261,14 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
           if(mpi.isMaster()) {
             fprintf(stdout, "============= PROPOSED PARAMETERS ==============\n");
             
-            int64_t min_teps = INT64_MAX, total_teps = 0;
+            int64_t min_teps = INT64_MAX;
+            double temp = 0;
             int64_t min_edges = INT64_MAX, max_edges = 0;
             int64_t min_nq_size = INT64_MAX, max_nq_size = 0;
             for(int i = root_start; i < num_bfs_roots; ++i) {
               if(min_teps > auto_tuning_data[i][AUTO_TEPS])
                 min_teps = auto_tuning_data[i][AUTO_TEPS];
-              total_teps += auto_tuning_data[i][AUTO_TEPS];
+              temp += ((double)1.0)/auto_tuning_data[i][AUTO_TEPS];
 
               if(auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES] != AUTO_NOT_DEFINED &&
                  min_edges > auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES])
@@ -285,6 +286,7 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
                  min_nq_size > auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_SIZE])
                 min_nq_size = auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_SIZE];
             }
+            double harmonic_mean_TEPS = (num_bfs_roots - root_start)/temp;
             
             double next_small_alpha = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / min_edges * 0.99;
             while(min_edges > int64_t(auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / next_small_alpha))
@@ -313,7 +315,7 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
 
             printf("---\n");
             for(int i = root_start; i < num_bfs_roots; ++i) {
-              if(auto_tuning_data[i][AUTO_TEPS] > int64_t(total_teps/num_bfs_roots)) continue;
+              if(auto_tuning_data[i][AUTO_TEPS] > harmonic_mean_TEPS) continue;
               if(min_teps == auto_tuning_data[i][AUTO_TEPS])
                 printf("*[%2d]", i);
               else
