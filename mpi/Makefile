@@ -1,5 +1,5 @@
-#SW =GNU3
-SW=FUGAKU
+SW =GNU3
+#SW=FUGAKU
 VAMP = false
 SCOREP = false
 
@@ -36,7 +36,7 @@ NVCC := nvcc
 
 INC := # -I$(CUDA_PATH)/include
 BINS := runnable
-OBJS := main.o low_level_func.o ../generator/splittable_mrg.o
+OBJS := main.o ../generator/splittable_mrg.o
 CUOBJ := cuda_kernel.o
 LIBS := -lm
 
