@@ -253,5 +253,7 @@ enum {
 #define AUTO_PRE_GLOBAL_NQ_EDGES 7
 #define AUTO_PRE_GLOBAL_NQ_SIZE  8
 #define AUTO_NOT_DEFINED        -1
+#define AUTO_LARGER              1
+#define AUTO_SMALLER             2
 
 #endif /* PARAMETERS_H_ */
