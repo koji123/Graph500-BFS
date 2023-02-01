@@ -122,8 +122,7 @@ double auto_tuning(int param, int root_start, int num_bfs_roots, BfsOnCPU* bench
         print_with_prefix("Something wrong !!");
         MPI_Finalize();
         exit(1);
-      }
-        
+      }        
       if(auto_tuning_data[min_index][AUTO_TEPS] > auto_tuning_data[max_index][AUTO_TEPS])
         larger_or_smaller = AUTO_LARGER;
       else
@@ -161,9 +160,9 @@ double auto_tuning(int param, int root_start, int num_bfs_roots, BfsOnCPU* bench
         while(max_nq_size < int64_t(auto_tuning_data[0][AUTO_NUM_GLOBAL_VERTS]/(beta * edgefactor * 2.0)))
           beta *= 1.01;
       }
-      
+
       if(mpi.isMaster())
-        print_with_prefix("i = %02d will be changed since %s is larger.", (IS_ALPHA)? "ALPHA" : "BETA", max_index);
+        print_with_prefix("i = %02d will be changed since %s is larger.", max_index, (IS_ALPHA)? "ALPHA" : "BETA");
     }
   } // end while
 
