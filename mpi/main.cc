@@ -164,6 +164,8 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
 	}
 
         if(enable_auto_tuning){
+          MPI_Barrier(mpi.comm_2d);
+          double elapsed_time = MPI_Wtime();
           if(mpi.isMaster())
             print_with_prefix("========= START AUTO TUNING FOR ALPHA ==========");
           
@@ -346,6 +348,7 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
           if(mpi.isMaster()){
             print_with_prefix("========== END AUTO TUNING FOR BETA ===========");
             print_with_prefix("New Beta = %f", beta);
+            print_with_prefix("Elapsed Time for tuning = %f sec.", MPI_Wtime() - elapsed_time);
           }
         } // end enable_auto_tuning
 
