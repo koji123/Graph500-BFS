@@ -34,6 +34,147 @@
 #include "bfs_gpu.hpp"
 #endif
 
+#define IS_ALPHA (param == AUTO_ALPHA)
+double auto_tuning(int param, int root_start, int num_bfs_roots, BfsOnCPU* benchmark,
+                   int64_t* bfs_roots, int64_t *pred, int SCALE, int edgefactor,
+                   int64_t auto_tuning_data[][AUTO_NUM], double alpha, double beta)
+{
+  if(mpi.isMaster())
+    print_with_prefix("========= START AUTO TUNING FOR %s ==========", (IS_ALPHA)? "ALPHA" : "BETA");
+
+  int larger_or_smaller = AUTO_NOT_DEFINED, pre_index = 0, n = 0;
+  int64_t pre_performance = -1;
+  double pre_value = (IS_ALPHA)? alpha : beta;
+
+  while(1){
+    double tmp = 0;
+    for(int i = root_start; i < num_bfs_roots; ++i) {
+      for(int j = 0; j < AUTO_NUM; ++j)
+        auto_tuning_data[i][j] = AUTO_NOT_DEFINED;
+    
+      MPI_Barrier(mpi.comm_2d);
+      double t = MPI_Wtime();
+      benchmark->run_bfs(bfs_roots[i], pred, edgefactor, alpha, beta, auto_tuning_data[i]);
+      t = MPI_Wtime() - t;
+      auto_tuning_data[i][AUTO_TEPS] = int64_t(pf_nedge[SCALE] / t);
+      tmp += ((double)1.0)/auto_tuning_data[i][AUTO_TEPS];
+    }
+    double harmonic_mean_TEPS = (num_bfs_roots - root_start)/tmp;
+
+    n++;
+    if(mpi.isMaster()){
+      print_with_prefix("n = %d, Alpha = %f, Beta = %f, Perf = %.0f", n, alpha, beta, harmonic_mean_TEPS);
+      for(int i = root_start; i < num_bfs_roots; ++i){
+        if(IS_ALPHA){
+          print_with_prefix("  i = %02d, Perf = %" PRId64 ", T2B = %d, %" PRId64 " > %" PRId64 "/%f",
+                            i, auto_tuning_data[i][AUTO_TEPS], (int)auto_tuning_data[i][AUTO_T2B_LEVEL],
+                            auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES], auto_tuning_data[i][AUTO_NUM_GLOBAL_EDGES], alpha);
+        }
+        else{
+          print_with_prefix("  i = %02d, Perf = %" PRId64 ", B2T = %d, %" PRId64 " < %" PRId64 "/(%f * %d * 2)",
+                            i, auto_tuning_data[i][AUTO_TEPS], (int)auto_tuning_data[i][AUTO_B2T_LEVEL],
+                            auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE], auto_tuning_data[i][AUTO_NUM_GLOBAL_VERTS], beta, edgefactor);
+        }
+      }
+    }
+
+    if(n != 1 && auto_tuning_data[pre_index][AUTO_TEPS] < pre_performance){
+      if(IS_ALPHA) alpha = pre_value;
+      else         beta  = pre_value;
+      
+      if(mpi.isMaster()) print_with_prefix("i = %02d is worse.", pre_index);
+      break;
+    }
+
+    int64_t min_edges = INT64_MAX, max_edges = 0, min_nq_size = INT64_MAX, max_nq_size = 0;
+    int min_index = -1, max_index = -1;
+    if(IS_ALPHA){
+      for(int i = root_start; i < num_bfs_roots; ++i) {
+        if(auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES] != AUTO_NOT_DEFINED &&
+           min_edges > auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES]){
+          min_edges = auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES];
+          min_index = i;
+        }
+        if(auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_EDGES] != AUTO_NOT_DEFINED &&
+           max_edges < auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_EDGES]){
+          max_edges = auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_EDGES];
+          max_index = i;
+        }
+      }
+    }
+    else{
+      for(int i = root_start; i < num_bfs_roots; ++i){
+        if(auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE] != AUTO_NOT_DEFINED &&
+           max_nq_size < auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE]){
+          max_nq_size = auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE];
+          max_index = i;
+        }
+        if(auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_SIZE] != AUTO_NOT_DEFINED &&
+           min_nq_size > auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_SIZE]){
+          min_nq_size = auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_SIZE];
+          min_index = i;
+        }
+      }
+    }
+    
+    if(n == 1){
+      if(min_index == -1 || max_index == -1){ // fix me
+        print_with_prefix("Something wrong !!");
+        MPI_Finalize();
+        exit(1);
+      }
+        
+      if(auto_tuning_data[min_index][AUTO_TEPS] > auto_tuning_data[max_index][AUTO_TEPS])
+        larger_or_smaller = AUTO_LARGER;
+      else
+        larger_or_smaller = AUTO_SMALLER;
+    }
+
+    pre_value = (IS_ALPHA)? alpha : beta;
+    if(larger_or_smaller == AUTO_SMALLER){
+      pre_index = min_index;
+      pre_performance = auto_tuning_data[min_index][AUTO_TEPS];
+      if(IS_ALPHA){
+        alpha = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / min_edges * 0.99;
+        while(min_edges > int64_t(auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / alpha))
+          alpha *= 0.99;
+      }
+      else{
+        beta = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_VERTS]/(min_nq_size * edgefactor * 2.0) * 0.99;
+        while(min_nq_size >= int64_t(auto_tuning_data[0][AUTO_NUM_GLOBAL_VERTS] / (beta * edgefactor * 2.0)))
+          beta *= 0.99;
+      }
+      
+      if(mpi.isMaster())
+        print_with_prefix("i = %02d will be changed since %s is smaller.", min_index, (IS_ALPHA)? "ALPHA" : "BETA");
+    }
+    else if(larger_or_smaller == AUTO_LARGER){
+      pre_index = max_index;
+      pre_performance = auto_tuning_data[max_index][AUTO_TEPS];
+      if(IS_ALPHA){
+        alpha = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / max_edges * 1.01;
+        while(max_edges <= int64_t(auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / alpha))
+          alpha *= 1.01;
+      }
+      else{
+        beta = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_VERTS]/(max_nq_size * edgefactor * 2.0) * 1.01;
+        while(max_nq_size < int64_t(auto_tuning_data[0][AUTO_NUM_GLOBAL_VERTS]/(beta * edgefactor * 2.0)))
+          beta *= 1.01;
+      }
+      
+      if(mpi.isMaster())
+        print_with_prefix("i = %02d will be changed since %s is larger.", (IS_ALPHA)? "ALPHA" : "BETA", max_index);
+    }
+  } // end while
+
+  if(mpi.isMaster()){
+    print_with_prefix("========== END AUTO TUNING FOR %s ===========", (IS_ALPHA)? "ALPHA" : "BETA");
+    print_with_prefix("New %s = %f", (IS_ALPHA)? "ALPHA" : "BETA", (IS_ALPHA)? alpha : beta);
+  }
+  
+  return (IS_ALPHA)? alpha : beta;
+}
+
 void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int validation_level,
                   bool enable_auto_tuning, bool pre_exec, bool real_benchmark)
 {
@@ -166,191 +307,12 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
         if(enable_auto_tuning){
           MPI_Barrier(mpi.comm_2d);
           double elapsed_time = MPI_Wtime();
+          alpha = auto_tuning(AUTO_ALPHA, root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, alpha, beta);
+          beta  = auto_tuning(AUTO_BETA,  root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, alpha, beta);
+          
           if(mpi.isMaster())
-            print_with_prefix("========= START AUTO TUNING FOR ALPHA ==========");
-          
-          int larger_or_smaller = AUTO_NOT_DEFINED, pre_index = 0, n = 0;
-          int64_t pre_performance = -1;
-          double pre_value = alpha;
-
-          while(1){
-            double tmp = 0;
-            for(int i = root_start; i < num_bfs_roots; ++i) {
-              for(int j = 0; j < AUTO_NUM; ++j)
-                auto_tuning_data[i][j] = AUTO_NOT_DEFINED;
-            
-              MPI_Barrier(mpi.comm_2d);
-              double t = MPI_Wtime();
-              benchmark->run_bfs(bfs_roots[i], pred, edgefactor, alpha, beta, auto_tuning_data[i]);
-              t = MPI_Wtime() - t;
-              auto_tuning_data[i][AUTO_TEPS] = int64_t(pf_nedge[SCALE] / t);
-              tmp += ((double)1.0)/auto_tuning_data[i][AUTO_TEPS];
-            }
-            double harmonic_mean_TEPS = (num_bfs_roots - root_start)/tmp;
-
-            n++;
-            if(mpi.isMaster()){
-              print_with_prefix("n = %d, Alpha = %f, Beta = %f, Perf = %.0f", n, alpha, beta, harmonic_mean_TEPS);
-              for(int i = root_start; i < num_bfs_roots; ++i)
-                print_with_prefix("  i = %02d, Perf = %" PRId64 ", T2B = %d, %" PRId64 " > %" PRId64 "/%f",
-                                  i, auto_tuning_data[i][AUTO_TEPS], (int)auto_tuning_data[i][AUTO_T2B_LEVEL],
-                                  auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES], auto_tuning_data[i][AUTO_NUM_GLOBAL_EDGES], alpha);
-            }
-
-            if(n != 1 && auto_tuning_data[pre_index][AUTO_TEPS] < pre_performance){
-              alpha = pre_value;
-              if(mpi.isMaster())
-                print_with_prefix("i = %02d is worse.", pre_index);
-              break;
-            }
-
-            int64_t min_edges = INT64_MAX, max_edges = 0;
-            int min_index = -1, max_index = -1;
-            for(int i = root_start; i < num_bfs_roots; ++i) {
-              if(auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES] != AUTO_NOT_DEFINED &&
-                 min_edges > auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES]){
-                min_edges = auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES];
-                min_index = i;
-              }
-              if(auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_EDGES] != AUTO_NOT_DEFINED &&
-                 max_edges < auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_EDGES]){
-                max_edges = auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_EDGES];
-                max_index = i;
-              }
-            }
-            
-            if(n == 1){
-              if(min_index == -1 || max_index == -1){ // fix me
-                print_with_prefix("Something wrong !!");
-                MPI_Finalize();
-                exit(1);
-              }
-              if(auto_tuning_data[min_index][AUTO_TEPS] > auto_tuning_data[max_index][AUTO_TEPS])
-                larger_or_smaller = AUTO_LARGER;
-              else
-                larger_or_smaller = AUTO_SMALLER;
-            }
-
-            pre_value = alpha;
-            if(larger_or_smaller == AUTO_SMALLER){
-              pre_index = min_index;
-              pre_performance = auto_tuning_data[min_index][AUTO_TEPS];
-              alpha = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / min_edges * 0.99;
-              while(min_edges > int64_t(auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / alpha))
-                alpha *= 0.99;
-              
-              if(mpi.isMaster())
-                print_with_prefix("i = %02d will be changed since alpha is smaller.", min_index);
-            }
-            else if(larger_or_smaller == AUTO_LARGER){
-              pre_index = max_index;
-              pre_performance = auto_tuning_data[max_index][AUTO_TEPS];
-              alpha = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / max_edges * 1.01;
-              while(max_edges <= int64_t(auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / alpha))
-                alpha *= 1.01;
-
-              if(mpi.isMaster())
-                print_with_prefix("i = %02d will be changed since alpha is larger.", max_index);
-            }
-          }
-          
-          if(mpi.isMaster()){
-            print_with_prefix("========== END AUTO TUNING FOR ALPHA ===========");
-            print_with_prefix("New Alpha = %f", alpha);
-            print_with_prefix("========= START AUTO TUNING FOR BETA ==========");
-          }
-          
-          larger_or_smaller = AUTO_NOT_DEFINED, pre_index = 0, n = 0;
-          pre_performance = -1;
-          pre_value = beta;
-
-          while(1){
-            double tmp = 0;
-            for(int i = root_start; i < num_bfs_roots; ++i) {
-              for(int j = 0; j < AUTO_NUM; ++j)
-                auto_tuning_data[i][j] = AUTO_NOT_DEFINED;
-              
-              MPI_Barrier(mpi.comm_2d);
-              double t = MPI_Wtime();
-              benchmark->run_bfs(bfs_roots[i], pred, edgefactor, alpha, beta, auto_tuning_data[i]);
-              t = MPI_Wtime() - t;
-              auto_tuning_data[i][AUTO_TEPS] = int64_t(pf_nedge[SCALE] / t);
-              tmp += ((double)1.0)/auto_tuning_data[i][AUTO_TEPS];
-            }
-            double harmonic_mean_TEPS = (num_bfs_roots - root_start)/tmp;
-
-            n++;
-            if(mpi.isMaster()){
-              print_with_prefix("n = %d, Alpha = %f, Beta = %f, Perf = %.0f", n, alpha, beta, harmonic_mean_TEPS);
-              for(int i = root_start; i < num_bfs_roots; ++i)
-                print_with_prefix("  i = %02d, Perf = %" PRId64 ", B2T = %d, %" PRId64 " < %" PRId64 "/(%f * %d * 2)",
-                                  i, auto_tuning_data[i][AUTO_TEPS], (int)auto_tuning_data[i][AUTO_B2T_LEVEL],
-                                  auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE], auto_tuning_data[i][AUTO_NUM_GLOBAL_VERTS], beta, edgefactor);
-            }
-            
-            if(n != 1 && auto_tuning_data[pre_index][AUTO_TEPS] < pre_performance){
-              beta = pre_value;
-              if(mpi.isMaster())
-                print_with_prefix("i = %02d is worse.", pre_index);
-              break;
-            }
-
-            int64_t min_nq_size = INT64_MAX, max_nq_size = 0;
-            int min_index = -1, max_index = -1;
-            for(int i = root_start; i < num_bfs_roots; ++i){
-              if(auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE] != AUTO_NOT_DEFINED &&
-                 max_nq_size < auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE]){
-                max_nq_size = auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE];
-                max_index = i;
-              }
-              if(auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_SIZE] != AUTO_NOT_DEFINED &&
-                 min_nq_size > auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_SIZE]){
-                min_nq_size = auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_SIZE];
-                min_index = i;
-              }
-            }
-            
-            if(n == 1){
-              if(min_index == -1 || max_index == -1){ // fix me
-                print_with_prefix("Something wrong !!");
-                MPI_Finalize();
-                exit(1);
-              }
-              if(auto_tuning_data[max_index][AUTO_TEPS] < auto_tuning_data[min_index][AUTO_TEPS])
-                larger_or_smaller = AUTO_LARGER;
-              else
-                larger_or_smaller = AUTO_SMALLER;
-            }
-
-            pre_value = beta;
-            if(larger_or_smaller == AUTO_LARGER){
-              pre_index = max_index;
-              pre_performance = auto_tuning_data[max_index][AUTO_TEPS];
-              beta = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_VERTS]/(max_nq_size * edgefactor * 2.0) * 1.01;
-              while(max_nq_size < int64_t(auto_tuning_data[0][AUTO_NUM_GLOBAL_VERTS]/(beta * edgefactor * 2.0)))
-                beta *= 1.01;
-                
-              if(mpi.isMaster())
-                print_with_prefix("i = %02d will be changed since beta is larger.", max_index);
-            }
-            else if(larger_or_smaller == AUTO_SMALLER){
-              pre_index = min_index;
-              pre_performance = auto_tuning_data[min_index][AUTO_TEPS];
-              beta = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_VERTS]/(min_nq_size * edgefactor * 2.0) * 0.99;
-              while(min_nq_size >= int64_t(auto_tuning_data[0][AUTO_NUM_GLOBAL_VERTS] / (beta * edgefactor * 2.0)))
-                beta *= 0.99;
-              
-              if(mpi.isMaster())
-                print_with_prefix("i = %02d will be changed since beta is smaller.", min_index);
-            }
-          }
-            
-          if(mpi.isMaster()){
-            print_with_prefix("========== END AUTO TUNING FOR BETA ===========");
-            print_with_prefix("New Beta = %f", beta);
             print_with_prefix("Elapsed Time for tuning = %f sec.", MPI_Wtime() - elapsed_time);
-          }
-        } // end enable_auto_tuning
+        }
 
 #ifdef PROFILE_REGIONS
 	timer_clear();

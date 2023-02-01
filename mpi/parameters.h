@@ -255,5 +255,7 @@ enum {
 #define AUTO_NOT_DEFINED        -1
 #define AUTO_LARGER              1
 #define AUTO_SMALLER             2
+#define AUTO_ALPHA               0
+#define AUTO_BETA                1
 
 #endif /* PARAMETERS_H_ */
