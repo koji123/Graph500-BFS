@@ -175,7 +175,7 @@ double auto_tuning(int param, int root_start, int num_bfs_roots, BfsOnCPU* bench
 }
 
 void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int validation_level,
-                  bool enable_auto_tuning, bool pre_exec, bool real_benchmark)
+                  bool auto_tuning_enabled, bool pre_exec, bool real_benchmark)
 {
 	using namespace PRM;
 	SET_AFFINITY;
@@ -303,7 +303,7 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
 #endif
 	}
 
-        if(enable_auto_tuning){
+        if(auto_tuning_enabled){
           MPI_Barrier(mpi.comm_2d);
           double elapsed_time = MPI_Wtime();
           alpha = auto_tuning(AUTO_ALPHA, root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, alpha, beta);
@@ -442,7 +442,7 @@ static void print_help(char *argv)
 }
 
 static void set_args(const int argc, char **argv, int *edge_factor, double *alpha, double *beta,
-                     int *validation_level, bool *enable_auto_tuning, bool *pre_exec, bool *real_benchmark)
+                     int *validation_level, bool *auto_tuning_enabled, bool *pre_exec, bool *real_benchmark)
 {
   int result;
   while((result = getopt(argc,argv,"e:a:b:v:APR"))!=-1){
@@ -468,7 +468,7 @@ static void set_args(const int argc, char **argv, int *edge_factor, double *alph
         ERROR("-v value >= 0 && value <= 2\n");
       break;
     case 'A':
-      *enable_auto_tuning = true;
+      *auto_tuning_enabled = true;
       break;
     case 'P':
       *pre_exec = true;
@@ -487,23 +487,23 @@ int main(int argc, char** argv)
   if(argc <= 1 || atoi(argv[1]) <= 0)
     print_help(argv[0]);
   
-  int scale               = atoi(argv[1]);
-  int edge_factor         = DEFAULT_EDGE_FACTOR; // nedges / nvertices, i.e., 2*avg. degree
-  double alpha            = DEFAULT_ALPHA;
-  double beta             = DEFAULT_BETA;
-  int validation_level    = DEFAULT_VALIDATION_LEVEL;
-  bool enable_auto_tuning = false;
-  bool real_benchmark     = false;
-  bool pre_exec           = false;
+  int scale                = atoi(argv[1]);
+  int edge_factor          = DEFAULT_EDGE_FACTOR; // nedges / nvertices, i.e., 2*avg. degree
+  double alpha             = DEFAULT_ALPHA;
+  double beta              = DEFAULT_BETA;
+  int validation_level     = DEFAULT_VALIDATION_LEVEL;
+  bool auto_tuning_enabled = false;
+  bool real_benchmark      = false;
+  bool pre_exec            = false;
 
-  set_args(argc, argv, &edge_factor, &alpha, &beta, &validation_level, &enable_auto_tuning, &pre_exec, &real_benchmark);
+  set_args(argc, argv, &edge_factor, &alpha, &beta, &validation_level, &auto_tuning_enabled, &pre_exec, &real_benchmark);
   if(real_benchmark){
     validation_level = 2;
     pre_exec = true;
   }
   
   setup_globals(argc, argv, scale, edge_factor);
-  graph500_bfs(scale, edge_factor, alpha, beta, validation_level, enable_auto_tuning, pre_exec, real_benchmark);
+  graph500_bfs(scale, edge_factor, alpha, beta, validation_level, auto_tuning_enabled, pre_exec, real_benchmark);
   cleanup_globals();
   
   return 0;
