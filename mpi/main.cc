@@ -143,32 +143,29 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
         MPI_Abort(MPI_COMM_WORLD, 1);
       }      
 
+      double pre_perf = perf[s[i].idx];
+      perf[s[i].idx] = new_perf;
+      double new_TEPS = calc_TEPS(root_start, num_bfs_roots, perf);
       if(mpi.isMaster()){
-        double tmp = 0;
-        for(int i = root_start; i < num_bfs_roots; ++i){
-          if(i == s[i].idx) tmp += ((double)1.0)/new_perf;
-          else              tmp += ((double)1.0)/perf[i];
-        }
-        double new_TEPS = (num_bfs_roots - root_start) / tmp;
         print_with_prefix("[%02d] %s: %d -> %d", s[i].idx, (IS_ALPHA)? "T2B" : "B2T", pre_level, cur_level);
         print_with_prefix("[%02d] Perf.: %.0f -> %.0f MTEPS (Harmonic Mean: %.0f -> %.0f MTEPS)",
-                          s[i].idx, perf[s[i].idx]/1000000, new_perf/1000000, pre_TEPS/1000000, new_TEPS/1000000);
-        
-        if(perf[s[i].idx] > new_perf){
+                          s[i].idx, pre_perf/1000000, new_perf/1000000, pre_TEPS/1000000, new_TEPS/1000000);
+      }
+
+      if(pre_perf > new_perf){
+        if(mpi.isMaster()){
           print_with_prefix("Auto tuning for %s is stopped", (IS_ALPHA)? "Alpha" : "Beta");
           print_with_prefix("%s is determined to be %f", (IS_ALPHA)? "Alpha" : "Beta", pre_param);
           print_with_prefix("========== END AUTO TUNING FOR %s ==========", (IS_ALPHA)? "ALPHA" : "BETA");
         }
-        else{
-          print_with_prefix("---");
-          pre_TEPS = new_TEPS;
-        }
-      }
-
-      if(perf[s[i].idx] > new_perf){
+        perf[s[i].idx] = pre_perf;
         if(IS_ALPHA) *alpha = pre_param;
         else         *beta  = pre_param;
         return false;
+      }
+      else{
+        if(mpi.isMaster()) print_with_prefix("---");
+        pre_TEPS = new_TEPS;
       }
     }
   }
@@ -218,32 +215,30 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
         print_with_prefix("Something Wrong %d", pre_level);
         MPI_Abort(MPI_COMM_WORLD, 1);
       }
-      
+
+      double pre_perf = perf[l[i].idx];
+      perf[l[i].idx] = new_perf;
+      double new_TEPS = calc_TEPS(root_start, num_bfs_roots, perf);
       if(mpi.isMaster()){
-        double tmp = 0;
-        for(int i = root_start; i < num_bfs_roots; ++i){
-          if(i == l[i].idx) tmp += ((double)1.0)/new_perf;
-          else              tmp += ((double)1.0)/perf[i];
-        }
-        double new_TEPS = (num_bfs_roots - root_start) / tmp;
         print_with_prefix("[%02d] %s: %d -> %d", l[i].idx, (IS_ALPHA)? "T2B" : "B2T", pre_level, cur_level);
         print_with_prefix("[%02d] Perf.: %.0f -> %.0f MTEPS (Harmonic Mean: %.0f -> %.0f MTEPS)",
-                          l[i].idx, perf[l[i].idx]/1000000, new_perf/1000000, pre_TEPS/1000000, new_TEPS/1000000);
-        if(perf[l[i].idx] > new_perf){
+                          l[i].idx, pre_perf/1000000, new_perf/1000000, pre_TEPS/1000000, new_TEPS/1000000);
+      }
+      
+      if(pre_perf > new_perf){
+        if(mpi.isMaster()){
           print_with_prefix("Auto tuning for %s is stopped", (IS_ALPHA)? "Alpha" : "Beta");
           print_with_prefix("%s is determined to be %f", (IS_ALPHA)? "Alpha" : "Beta", pre_param);
           print_with_prefix("========== END AUTO TUNING FOR %s ==========", (IS_ALPHA)? "ALPHA" : "BETA");
         }
-        else{
-          print_with_prefix("---");
-          pre_TEPS = new_TEPS;
-        }
-      }
-      
-      if(perf[l[i].idx] > new_perf){
+        perf[l[i].idx] = pre_perf;
         if(IS_ALPHA) *alpha = pre_param;
         else         *beta  = pre_param;
         return false;
+      }
+      else{
+        if(mpi.isMaster()) print_with_prefix("---");
+        pre_TEPS = new_TEPS;
       }
     }
   }
