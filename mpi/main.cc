@@ -313,7 +313,6 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
 	redistribution_time = MPI_Wtime() - redistribution_time;
 
 	int64_t bfs_roots[num_bfs_roots];
-	find_roots(benchmark->graph_, bfs_roots, num_bfs_roots);
 	const int64_t max_used_vertex = find_max_used_vertex(benchmark->graph_);
 	const int64_t nlocalverts = benchmark->graph_.pred_size();
 
@@ -333,7 +332,27 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
 		init_log(SCALE, edgefactor, generation_time, construction_time, redistribution_time, &log);
 
 	benchmark->prepare_bfs(validation_level, pre_exec, real_benchmark);
-	
+
+        // Prevent picking isolated points as starting points
+        int r = 0;
+        if(SCALE <= 6){
+          find_roots(benchmark->graph_, bfs_roots, num_bfs_roots, r, 0);
+        }
+        else{
+          while(1){
+            find_roots(benchmark->graph_, bfs_roots, num_bfs_roots, r, 0);
+            bool flag = true;
+            for(int i = root_start; i < num_bfs_roots; ++i){
+              benchmark->run_bfs(bfs_roots[i], pred, edgefactor, alpha, beta, auto_tuning_data[i]);
+              if(auto_tuning_data[i][AUTO_LEVEL] <= 2)
+                flag = false;
+            }
+            if(flag) break;
+            if(mpi.isMaster()) print_with_prefix("Pick starting points again");
+            r++;
+          }
+        }
+        
 	if(pre_exec){
 #ifdef _FUGAKU_POWER_MEASUREMENT
 	  PWR_Cntxt cntxt = NULL;

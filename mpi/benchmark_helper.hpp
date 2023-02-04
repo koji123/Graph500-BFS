@@ -383,7 +383,7 @@ void decode_edge(GraphType& g, int64_t e0, int64_t e1, int64_t& v0, int64_t& v1,
 }
 
 template <typename GraphType>
-void find_roots(GraphType& g, int64_t* bfs_roots, int& num_bfs_roots)
+void find_roots(GraphType& g, int64_t* bfs_roots, int& num_bfs_roots, int r1, int r2)
 {
 	using namespace PRM;
 	/* Find roots and max used vertex */
@@ -394,7 +394,7 @@ void find_roots(GraphType& g, int64_t* bfs_roots, int& num_bfs_roots)
 		int64_t root;
 		while (1) {
 			double d[2];
-			make_random_numbers(2, USERSEED1, USERSEED2, counter, d);
+			make_random_numbers(2, USERSEED1+r1, USERSEED2+r2, counter, d);
 			root = (int64_t)((d[0] + d[1]) * nglobalverts) % nglobalverts;
 			counter += 2;
 			if (counter > 2 * nglobalverts) break;
