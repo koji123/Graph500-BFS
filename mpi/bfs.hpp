@@ -2783,7 +2783,7 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const d
 	  current_expand = (forward_or_backward_)? TD_EXPAND_TIME : BU_EXPAND_TIME;
 	  current_fold   = (forward_or_backward_)? TD_FOLD_TIME   : BU_FOLD_TIME;
 #endif
-		++current_level_;
+          auto_tuning_data[AUTO_LEVEL] = ++current_level_;
 #if VERVOSE_MODE
 		num_edge_top_down_ = 0;
 		num_td_large_edge_ = 0;

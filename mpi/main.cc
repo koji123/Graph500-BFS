@@ -63,7 +63,7 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
     }
     else{
       for(int i = root_start; i < num_bfs_roots; ++i)
-        print_with_prefix("[%02d] Perf. = %.0f MTES, B2T = %d, %" PRId64 " < %" PRId64 "/(%f * %d * 2)",
+        print_with_prefix("[%02d] Perf. = %.0f MTEPS, B2T = %d, %" PRId64 " < %" PRId64 "/(%f * %d * 2)",
                           i, perf[i]/1000000, (int)auto_tuning_data[i][AUTO_B2T_LEVEL],
                           auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE], auto_tuning_data[i][AUTO_NUM_GLOBAL_VERTS], *beta, edgefactor);
     }
@@ -87,27 +87,49 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
 
   std::sort(s, s + s_num);
   std::sort(l, l + l_num);
-  /*
-  if(mpi.isMaster()){
-    for(int i=0;i<s_num;i++)
-      print_with_prefix("[%d] %" PRId64 "", s[i].idx, s[i].val);
-    print_with_prefix("--");
-    for(int i=0;i<l_num;i++)
-      print_with_prefix("[%d] %" PRId64 "", l[i].idx, l[i].val);
-      }*/
- 
-  if(perf[s[0].idx] < perf[l[l_num-1].idx]){
+
+  bool value_is_smaller = false;
+  if(s_num == 0)
+    return false;
+  else if(l_num == 0)
+    value_is_smaller = true;
+  else if(perf[s[0].idx] < perf[l[l_num-1].idx])
+    value_is_smaller = true;
+  
+  if(value_is_smaller){
+    // When Alpha is decreased, T2B is increased.
+    // When Beta  is decreased, B2T is decreased.
     for(int i = 0; i < s_num; ++i){
       pre_param = (IS_ALPHA)? *alpha : *beta;
       int pre_level = (IS_ALPHA)? auto_tuning_data[s[i].idx][AUTO_T2B_LEVEL] : auto_tuning_data[s[i].idx][AUTO_B2T_LEVEL];
-      if(IS_ALPHA)
-        *alpha = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / s[i].val * 0.99;
-      else
-        *beta = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_VERTS]/ (s[i].val * edgefactor * 2.0) * 0.99;
+      if((IS_ALPHA && pre_level+1 == auto_tuning_data[s[i].idx][AUTO_LEVEL]) || (IS_BETA && pre_level == 1) ||
+         pre_level == AUTO_NOT_DEFINED){
+        if(mpi.isMaster()){
+          print_with_prefix("[%02d] %s cannot be %s", s[i].idx, (IS_ALPHA)? "T2B" : "B2T", (IS_ALPHA)? "larger" : "smaller");
+          print_with_prefix("Auto tuning for %s is stopped", (IS_ALPHA)? "Alpha" : "Beta");
+          print_with_prefix("%s is determined to be %f", (IS_ALPHA)? "Alpha" : "Beta", pre_param);
+          print_with_prefix("========== END AUTO TUNING FOR %s ==========", (IS_ALPHA)? "ALPHA" : "BETA");
+        }
+        return false;
+      }
+
+      if(IS_ALPHA){
+        *alpha = (double)auto_tuning_data[s[i].idx][AUTO_NUM_GLOBAL_EDGES] / s[i].val * 0.99;
+        while(s[i].val > int64_t(auto_tuning_data[s[i].idx][AUTO_NUM_GLOBAL_EDGES] / *alpha))
+          *alpha *= 0.99;
+      }
+      else{
+        *beta = (double)auto_tuning_data[s[i].idx][AUTO_NUM_GLOBAL_VERTS]/ (s[i].val * edgefactor * 2.0) * 0.99;
+        while(s[i].val >= int64_t(auto_tuning_data[s[i].idx][AUTO_NUM_GLOBAL_VERTS] / (*beta * edgefactor * 2.0)))
+          *beta *= 0.99;
+      }
 
       if(mpi.isMaster())
         print_with_prefix("[%02d] %s: %f -> %f", s[i].idx, (IS_ALPHA)? "Alpha" : "Beta", pre_param, (IS_ALPHA)? *alpha : *beta);
 
+      for(int j = 0; j < AUTO_NUM; ++j)
+        auto_tuning_data[s[i].idx][j] = AUTO_NOT_DEFINED;
+      
       MPI_Barrier(mpi.comm_2d);
       double t = MPI_Wtime();
       benchmark->run_bfs(bfs_roots[s[i].idx], pred, edgefactor, *alpha, *beta, auto_tuning_data[s[i].idx]);
@@ -117,7 +139,7 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
 
       int cur_level = (IS_ALPHA)? auto_tuning_data[s[i].idx][AUTO_T2B_LEVEL] : auto_tuning_data[s[i].idx][AUTO_B2T_LEVEL];
       if(pre_level == cur_level){
-        print_with_prefix("Something Wrong");
+        print_with_prefix("Something Wrong %d", pre_level);
         MPI_Abort(MPI_COMM_WORLD, 1);
       }      
 
@@ -151,17 +173,39 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
     }
   }
   else{
+    // When Alpha is increased, T2B is decreased.
+    // When Beta  is increased, B2T is increased.
     for(int i = l_num-1; i >= 0; --i){
       pre_param = (IS_ALPHA)? *alpha : *beta;
       int pre_level = (IS_ALPHA)? auto_tuning_data[l[i].idx][AUTO_T2B_LEVEL] : auto_tuning_data[l[i].idx][AUTO_B2T_LEVEL];
-      if(IS_ALPHA)
-        *alpha = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_EDGES] / l[i].val * 1.01;
-      else
-        *beta = (double)auto_tuning_data[0][AUTO_NUM_GLOBAL_VERTS] / (l[i].val * edgefactor * 2.0) * 1.01;
+      if((IS_ALPHA && pre_level == 1) || (IS_BETA && pre_level+1 == auto_tuning_data[l[i].idx][AUTO_LEVEL]) ||
+         pre_level == AUTO_NOT_DEFINED){
+        if(mpi.isMaster()){
+          print_with_prefix("[%02d] %s cannot be %s", l[i].idx, (IS_ALPHA)? "T2B" : "B2T", (IS_ALPHA)? "smaller" : "larger");
+          print_with_prefix("Auto tuning for %s is stopped", (IS_ALPHA)? "Alpha" : "Beta");
+          print_with_prefix("%s is determined to be %f", (IS_ALPHA)? "Alpha" : "Beta", pre_param);
+          print_with_prefix("========== END AUTO TUNING FOR %s ==========", (IS_ALPHA)? "ALPHA" : "BETA");
+        }
+        return false;
+      }
+      
+      if(IS_ALPHA){
+        *alpha = (double)auto_tuning_data[l[i].idx][AUTO_NUM_GLOBAL_EDGES] / l[i].val * 1.01;
+        while(l[i].val <= int64_t(auto_tuning_data[l[i].idx][AUTO_NUM_GLOBAL_EDGES] / *alpha))
+          *alpha *= 1.01;
+      }
+      else{
+        *beta = (double)auto_tuning_data[l[i].idx][AUTO_NUM_GLOBAL_VERTS] / (l[i].val * edgefactor * 2.0) * 1.01;
+        while(l[i].val < int64_t(auto_tuning_data[l[i].idx][AUTO_NUM_GLOBAL_VERTS] / (*beta * edgefactor * 2.0)))
+          *beta *= 1.01;
+      }
 
       if(mpi.isMaster())
         print_with_prefix("[%02d] %s: %f -> %f", l[i].idx, (IS_ALPHA)? "Alpha" : "Beta", pre_param, (IS_ALPHA)? *alpha : *beta);
 
+      for(int j = 0; j < AUTO_NUM; ++j)
+        auto_tuning_data[l[i].idx][j] = AUTO_NOT_DEFINED;
+      
       MPI_Barrier(mpi.comm_2d);
       double t = MPI_Wtime();
       benchmark->run_bfs(bfs_roots[l[i].idx], pred, edgefactor, *alpha, *beta, auto_tuning_data[l[i].idx]);
@@ -171,7 +215,7 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
       
       int cur_level = (IS_ALPHA)? auto_tuning_data[l[i].idx][AUTO_T2B_LEVEL] : auto_tuning_data[l[i].idx][AUTO_B2T_LEVEL];
       if(pre_level == cur_level){
-        print_with_prefix("Something Wrong");
+        print_with_prefix("Something Wrong %d", pre_level);
         MPI_Abort(MPI_COMM_WORLD, 1);
       }
       
