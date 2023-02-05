@@ -333,23 +333,23 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
 
 	benchmark->prepare_bfs(validation_level, pre_exec, real_benchmark);
 
+        find_roots(benchmark->graph_, bfs_roots, num_bfs_roots, 0, 0);
+        
         // Prevent picking isolated points as starting points
-        int r = 0;
-        if(SCALE <= 6){
-          find_roots(benchmark->graph_, bfs_roots, num_bfs_roots, r, 0);
-        }
-        else{
+        if(SCALE > START_POINTS_THRESHOLD){
+          int r = 0;
           while(1){
-            find_roots(benchmark->graph_, bfs_roots, num_bfs_roots, r, 0);
             bool flag = true;
             for(int i = root_start; i < num_bfs_roots; ++i){
               benchmark->run_bfs(bfs_roots[i], pred, edgefactor, alpha, beta, auto_tuning_data[i]);
-              if(auto_tuning_data[i][AUTO_LEVEL] <= 2)
+              if(auto_tuning_data[i][AUTO_LEVEL] <= 3){
                 flag = false;
+                break;
+              }
             }
             if(flag) break;
             if(mpi.isMaster()) print_with_prefix("Pick starting points again");
-            r++;
+            find_roots(benchmark->graph_, bfs_roots, num_bfs_roots, r++, 0);
           }
         }
         
