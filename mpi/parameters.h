@@ -257,8 +257,11 @@ enum {
 #define AUTO_SMALLER             2
 #define AUTO_ALPHA               0
 #define AUTO_BETA                1
+#define	AUTO_NUM_RETRIES        10
 #define IS_ALPHA (param == AUTO_ALPHA)
 #define IS_BETA  (param == AUTO_BETA)
+#define REMOVE_ROOTS_SCALE_THED 6
+#define REMOVE_ROOTS_LEVEL_THED 3
 
 struct auto_tuning_t {
   int64_t val;

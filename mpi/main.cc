@@ -67,7 +67,6 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
                           i, perf[i]/1000000, (int)auto_tuning_data[i][AUTO_B2T_LEVEL],
                           auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE], auto_tuning_data[i][AUTO_NUM_GLOBAL_VERTS], *beta, edgefactor);
     }
-    print_with_prefix("---");
   }
 
   for(int i = root_start; i < num_bfs_roots; ++i){
@@ -108,7 +107,6 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
           print_with_prefix("[%02d] %s cannot be %s", s[i].idx, (IS_ALPHA)? "T2B" : "B2T", (IS_ALPHA)? "larger" : "smaller");
           print_with_prefix("Auto tuning for %s is stopped", (IS_ALPHA)? "Alpha" : "Beta");
           print_with_prefix("%s is determined to be %f", (IS_ALPHA)? "Alpha" : "Beta", pre_param);
-          print_with_prefix("========== END AUTO TUNING FOR %s ==========", (IS_ALPHA)? "ALPHA" : "BETA");
         }
         return false;
       }
@@ -156,7 +154,6 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
         if(mpi.isMaster()){
           print_with_prefix("Auto tuning for %s is stopped", (IS_ALPHA)? "Alpha" : "Beta");
           print_with_prefix("%s is determined to be %f", (IS_ALPHA)? "Alpha" : "Beta", pre_param);
-          print_with_prefix("========== END AUTO TUNING FOR %s ==========", (IS_ALPHA)? "ALPHA" : "BETA");
         }
         perf[s[i].idx] = pre_perf;
         if(IS_ALPHA) *alpha = pre_param;
@@ -164,7 +161,6 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
         return false;
       }
       else{
-        if(mpi.isMaster()) print_with_prefix("---");
         pre_TEPS = new_TEPS;
       }
     }
@@ -181,7 +177,6 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
           print_with_prefix("[%02d] %s cannot be %s", l[i].idx, (IS_ALPHA)? "T2B" : "B2T", (IS_ALPHA)? "smaller" : "larger");
           print_with_prefix("Auto tuning for %s is stopped", (IS_ALPHA)? "Alpha" : "Beta");
           print_with_prefix("%s is determined to be %f", (IS_ALPHA)? "Alpha" : "Beta", pre_param);
-          print_with_prefix("========== END AUTO TUNING FOR %s ==========", (IS_ALPHA)? "ALPHA" : "BETA");
         }
         return false;
       }
@@ -229,7 +224,6 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
         if(mpi.isMaster()){
           print_with_prefix("Auto tuning for %s is stopped", (IS_ALPHA)? "Alpha" : "Beta");
           print_with_prefix("%s is determined to be %f", (IS_ALPHA)? "Alpha" : "Beta", pre_param);
-          print_with_prefix("========== END AUTO TUNING FOR %s ==========", (IS_ALPHA)? "ALPHA" : "BETA");
         }
         perf[l[i].idx] = pre_perf;
         if(IS_ALPHA) *alpha = pre_param;
@@ -237,7 +231,6 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
         return false;
       }
       else{
-        if(mpi.isMaster()) print_with_prefix("---");
         pre_TEPS = new_TEPS;
       }
     }
@@ -263,17 +256,39 @@ void measure_performance(int root_start, int num_bfs_roots, BfsOnCPU* benchmark,
   MPI_Bcast(&perf[root_start], num_bfs_roots - root_start, MPI_DOUBLE, 0, mpi.comm_2d);
 }
 
-void auto_tuning(int root_start, int num_bfs_roots, BfsOnCPU* benchmark, int64_t* bfs_roots, int64_t *pred,
-                 int SCALE, int edgefactor, int64_t auto_tuning_data[][AUTO_NUM], double* alpha, double* beta)
+double auto_tuning(int root_start, int num_bfs_roots, BfsOnCPU* benchmark, int64_t* bfs_roots, int64_t *pred,
+                   int SCALE, int edgefactor, double* alpha, double* beta, int *r)
 {
   double perf[num_bfs_roots];
-  measure_performance(root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, *alpha, *beta, perf);
-  while(auto_tuning_each(AUTO_ALPHA, root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, alpha, beta, perf)){
-    measure_performance(root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, *alpha, *beta, perf);
+  int64_t auto_tuning_data[num_bfs_roots][AUTO_NUM];
+  
+  find_roots(benchmark->graph_, bfs_roots, num_bfs_roots, *r, 0);
+  measure_performance(root_start, num_bfs_roots, benchmark, bfs_roots, pred,
+                      SCALE, edgefactor, auto_tuning_data, *alpha, *beta, perf);
+
+  // Re-pickup roots if one of roots is in a small graph
+  if(SCALE > REMOVE_ROOTS_SCALE_THED){
+    while(1){
+      bool flag = true;
+      for(int i = root_start; i < num_bfs_roots; ++i)
+        if(auto_tuning_data[i][AUTO_LEVEL] <= REMOVE_ROOTS_LEVEL_THED)
+          flag = false;
+
+      if(flag) break;
+      if(mpi.isMaster()) print_with_prefix("Pick starting points again");
+      find_roots(benchmark->graph_, bfs_roots, num_bfs_roots, ++(*r), 0);
+      measure_performance(root_start, num_bfs_roots, benchmark, bfs_roots, pred,
+                          SCALE, edgefactor, auto_tuning_data, *alpha, *beta, perf);
+    }
   }
-  while(auto_tuning_each(AUTO_BETA,  root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, alpha, beta, perf)){
+  
+  while(auto_tuning_each(AUTO_ALPHA, root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, alpha, beta, perf))
     measure_performance(root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, *alpha, *beta, perf);
-  }
+
+  while(auto_tuning_each(AUTO_BETA,  root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, alpha, beta, perf))
+    measure_performance(root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, *alpha, *beta, perf);
+
+  return calc_TEPS(root_start, num_bfs_roots, perf);
 }
 
 void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int validation_level,
@@ -329,30 +344,46 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
 	bool result_ok = true;
 
 	if(root_start == 0)
-		init_log(SCALE, edgefactor, generation_time, construction_time, redistribution_time, &log);
+          init_log(SCALE, edgefactor, generation_time, construction_time, redistribution_time, &log);
 
 	benchmark->prepare_bfs(validation_level, pre_exec, real_benchmark);
 
-        find_roots(benchmark->graph_, bfs_roots, num_bfs_roots, 0, 0);
-        
-        // Prevent picking isolated points as starting points
-        if(SCALE > START_POINTS_THRESHOLD){
-          int r = 0;
-          while(1){
-            bool flag = true;
-            for(int i = root_start; i < num_bfs_roots; ++i){
-              benchmark->run_bfs(bfs_roots[i], pred, edgefactor, alpha, beta, auto_tuning_data[i]);
-              if(auto_tuning_data[i][AUTO_LEVEL] <= 3){
-                flag = false;
-                break;
-              }
+        if(auto_tuning_enabled){
+          int best_r = 0;
+          double best_perf = 0, best_alpha = 0, best_beta = 0, best_bfs_roots[num_bfs_roots];
+          
+          MPI_Barrier(mpi.comm_2d);
+          double elapsed_time = MPI_Wtime();
+          
+          for(int i=0,r=0;i<AUTO_NUM_RETRIES;i++,r++){
+            double tmp_alpha = alpha, tmp_beta = beta;
+            double tmp_perf = auto_tuning(root_start, num_bfs_roots, benchmark, bfs_roots, pred,
+                                          SCALE, edgefactor, &tmp_alpha, &tmp_beta, &r);
+            if(mpi.isMaster())
+              print_with_prefix("Performance = %f MTEPS with Alpha = %f and Beta = %f in r = %d",
+                                tmp_perf/1000000, tmp_alpha, tmp_beta, r);
+            if(tmp_perf > best_perf){
+              best_perf  = tmp_perf;
+              best_alpha = tmp_alpha;
+              best_beta  = tmp_beta;
+              best_r     = r;
+              memcpy(best_bfs_roots, bfs_roots, sizeof(double)*num_bfs_roots);
             }
-            if(flag) break;
-            if(mpi.isMaster()) print_with_prefix("Pick starting points again");
-            find_roots(benchmark->graph_, bfs_roots, num_bfs_roots, r++, 0);
+          }
+
+          alpha = best_alpha;
+          beta  = best_beta;
+          memcpy(bfs_roots, best_bfs_roots, sizeof(double)*num_bfs_roots);
+          if(mpi.isMaster()){
+            print_with_prefix("Elapsed Time for auto tuning = %f sec.", MPI_Wtime() - elapsed_time);
+            print_with_prefix("Best Performance = %f MTEPS with Alpha = %f and Beta = %f in r = %d",
+                              best_perf/1000000, alpha, beta, best_r);
           }
         }
-        
+        else{
+          find_roots(benchmark->graph_, bfs_roots, num_bfs_roots, 0, 0);
+        }
+
 	if(pre_exec){
 #ifdef _FUGAKU_POWER_MEASUREMENT
 	  PWR_Cntxt cntxt = NULL;
@@ -423,15 +454,6 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
 	  }
 #endif
 	}
-
-        if(auto_tuning_enabled){
-          MPI_Barrier(mpi.comm_2d);
-          double elapsed_time = MPI_Wtime();
-          auto_tuning(root_start, num_bfs_roots, benchmark, bfs_roots, pred, SCALE, edgefactor, auto_tuning_data, &alpha, &beta);
-          
-          if(mpi.isMaster())
-            print_with_prefix("Elapsed Time for auto tuning = %f sec.", MPI_Wtime() - elapsed_time);
-        }
 
 #ifdef PROFILE_REGIONS
 	timer_clear();
