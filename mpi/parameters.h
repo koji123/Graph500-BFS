@@ -80,7 +80,7 @@
 
 #define PRE_EXEC_TIME 0
 #define REAL_BFS_ROOTS 64
-#define TEST_BFS_ROOTS 16
+#define TEST_BFS_ROOTS 1600
 
 #define BACKTRACE_ON_SIGNAL 0
 #define PRINT_BT_SIGNAL SIGTRAP
@@ -257,7 +257,6 @@ enum {
 #define AUTO_SMALLER             2
 #define AUTO_ALPHA               0
 #define AUTO_BETA                1
-#define	AUTO_NUM_RETRIES        10
 #define IS_ALPHA (param == AUTO_ALPHA)
 #define IS_BETA  (param == AUTO_BETA)
 #define REMOVE_ROOTS_SCALE_THED 6
