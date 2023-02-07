@@ -78,7 +78,7 @@
 // But this is not true in the general case. BFS may generate wrong answer in some situation.
 #define INIT_PRED_ONCE 0
 
-#define PRE_EXEC_TIME 300
+#define PRE_EXEC_TIME 0
 #define REAL_BFS_ROOTS 64
 #define TEST_BFS_ROOTS 16
 
@@ -241,5 +241,32 @@ enum {
 };
 } // namespace GPU_PARAMS {
 #endif // #ifdef __cplusplus
+
+#define AUTO_NUM                 9
+#define AUTO_GLOBAL_NQ_EDGES     0
+#define AUTO_NUM_GLOBAL_EDGES    1
+#define AUTO_T2B_LEVEL           2
+#define AUTO_GLOBAL_NQ_SIZE      3
+#define AUTO_NUM_GLOBAL_VERTS    4
+#define AUTO_B2T_LEVEL           5
+#define AUTO_PRE_GLOBAL_NQ_EDGES 6
+#define AUTO_PRE_GLOBAL_NQ_SIZE  7
+#define AUTO_LEVEL               8
+#define AUTO_NOT_DEFINED        -1
+#define AUTO_LARGER              1
+#define AUTO_SMALLER             2
+#define AUTO_ALPHA               0
+#define AUTO_BETA                1
+#define IS_ALPHA (param == AUTO_ALPHA)
+#define IS_BETA  (param == AUTO_BETA)
+#define REMOVE_ROOTS_SCALE_THED 6
+#define REMOVE_ROOTS_LEVEL_THED 3
+
+struct auto_tuning_t {
+  int64_t val;
+  int idx;
+
+  bool operator<(const auto_tuning_t& x) { return val < x.val; }
+};
 
 #endif /* PARAMETERS_H_ */

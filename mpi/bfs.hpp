@@ -116,7 +116,7 @@ public:
 		allocate_memory();
 	}
 
-        void run_bfs(int64_t root, int64_t* pred, const int edgefactor, const double alpha, const double beta);
+        void run_bfs(int64_t root, int64_t* pred, const int edgefactor, const double alpha, const double beta, int64_t* auto_tuning_data);
 
 	void get_pred(int64_t* pred) {
 	//	comm_.release_extra_buffer();
@@ -2724,12 +2724,13 @@ public:
 	PROF(profiling::TimeSpan gather_nq_time_);
 };
 
-void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const double alpha, const double beta)
+void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const double alpha, const double beta, int64_t* auto_tuning_data)
 {
 	SET_AFFINITY;
 #if ENABLE_FUJI_PROF
 	fapp_start("initialize", 0, 0);
 #endif
+        
 	TRACER(run_bfs);
 	pred_ = pred;
 #if VERVOSE_MODE
@@ -2782,7 +2783,7 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const d
 	  current_expand = (forward_or_backward_)? TD_EXPAND_TIME : BU_EXPAND_TIME;
 	  current_fold   = (forward_or_backward_)? TD_FOLD_TIME   : BU_FOLD_TIME;
 #endif
-		++current_level_;
+          auto_tuning_data[AUTO_LEVEL] = ++current_level_;
 #if VERVOSE_MODE
 		num_edge_top_down_ = 0;
 		num_td_large_edge_ = 0;
@@ -2888,28 +2889,40 @@ void BfsBase::run_bfs(int64_t root, int64_t* pred, const int edgefactor, const d
 #endif
 		next_bitmap_or_list = !forward_or_backward_;
 		if(growing_or_shrinking_ && global_nq_size_ > prev_global_nq_size) { // growing
-			if(forward_or_backward_ // forward ?
-                           && global_nq_edges_ > int64_t(graph_.num_global_edges_ / alpha)
-				) { // switch to backward
-				next_forward_or_backward = false;
-				packet_buffer_is_dirty_ = true;
-			}
+                  if(forward_or_backward_){ // forward ?
+                    if(global_nq_edges_ > int64_t(graph_.num_global_edges_ / alpha)) { // switch to backward
+                      next_forward_or_backward = false;
+                      packet_buffer_is_dirty_ = true;
+                      auto_tuning_data[AUTO_GLOBAL_NQ_EDGES]  = global_nq_edges_;
+                      auto_tuning_data[AUTO_NUM_GLOBAL_EDGES] = graph_.num_global_edges_;
+                      auto_tuning_data[AUTO_T2B_LEVEL]        = current_level_;
+                    }
+                    else{
+                      auto_tuning_data[AUTO_PRE_GLOBAL_NQ_EDGES] = global_nq_edges_;
+                    }
+                  }
 		}
 		else { // shrinking
-			if(!forward_or_backward_  // backward ?
-                           && global_nq_size_ < int64_t(graph_.num_global_verts_ / (beta * edgefactor * 2.0))
-				) { // switch to topdown
-				next_forward_or_backward = true;
-				growing_or_shrinking_ = false;
-
-				// Enabled if we compress lists with VLQ
-				//int max_capacity = vlq::BitmapEncoder::calc_capacity_of_values(
-				//		bitmap_width, NBPE, bitmap_width*sizeof(BitmapType));
-				//int threashold = std::min<int>(max_capacity, bitmap_width*sizeof(BitmapType)/2);
-				int bitmap_width = get_bitmap_size_local();
-				double threashold = bitmap_width*sizeof(BitmapType)/sizeof(TwodVertex)/denom_bitmap_to_list_;
-				next_bitmap_or_list = (max_nq_size_ >= threashold);
-			}
+                  if(!forward_or_backward_){  // backward ?
+                    if(global_nq_size_ < int64_t(graph_.num_global_verts_ / (beta * edgefactor * 2.0))) { // switch to topdown
+                      next_forward_or_backward = true;
+                      growing_or_shrinking_ = false;
+                      
+                      // Enabled if we compress lists with VLQ
+                      //int max_capacity = vlq::BitmapEncoder::calc_capacity_of_values(
+                      //		bitmap_width, NBPE, bitmap_width*sizeof(BitmapType));
+                      //int threashold = std::min<int>(max_capacity, bitmap_width*sizeof(BitmapType)/2);
+                      int bitmap_width = get_bitmap_size_local();
+                      double threashold = bitmap_width*sizeof(BitmapType)/sizeof(TwodVertex)/denom_bitmap_to_list_;
+                      next_bitmap_or_list = (max_nq_size_ >= threashold);
+                      auto_tuning_data[AUTO_GLOBAL_NQ_SIZE]   = global_nq_size_;
+                      auto_tuning_data[AUTO_NUM_GLOBAL_VERTS] = graph_.num_global_verts_;
+                      auto_tuning_data[AUTO_B2T_LEVEL]        = current_level_;
+                    }
+                    else{
+                      auto_tuning_data[AUTO_PRE_GLOBAL_NQ_SIZE] = global_nq_size_;
+                    }
+                  }
 		}
 		if(next_forward_or_backward == false) {
 			// bottom-up only with bitmap
