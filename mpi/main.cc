@@ -57,15 +57,17 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
     
     if(IS_ALPHA){
       for(int i = root_start; i < num_bfs_roots; ++i)
-        print_with_prefix("[%02d] Perf. = %.0f MTEPS, T2B = %d, %" PRId64 " > %" PRId64 "/%f",
+        print_with_prefix("[%02d] Perf. = %.0f MTEPS, T2B = %d, %" PRId64 " > %" PRId64 "/%f (%" PRId64 ")",
                           i, perf[i]/1000000, (int)auto_tuning_data[i][AUTO_T2B_LEVEL],
-                          auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES], auto_tuning_data[i][AUTO_NUM_GLOBAL_EDGES], *alpha);
+                          auto_tuning_data[i][AUTO_GLOBAL_NQ_EDGES], auto_tuning_data[i][AUTO_NUM_GLOBAL_EDGES], *alpha,
+                          auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_EDGES]);
     }
     else{
       for(int i = root_start; i < num_bfs_roots; ++i)
-        print_with_prefix("[%02d] Perf. = %.0f MTEPS, B2T = %d, %" PRId64 " < %" PRId64 "/(%f * %d * 2)",
+        print_with_prefix("[%02d] Perf. = %.0f MTEPS, B2T = %d, %" PRId64 " < %" PRId64 "/(%f * %d * 2) : (%" PRId64 ")",
                           i, perf[i]/1000000, (int)auto_tuning_data[i][AUTO_B2T_LEVEL],
-                          auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE], auto_tuning_data[i][AUTO_NUM_GLOBAL_VERTS], *beta, edgefactor);
+                          auto_tuning_data[i][AUTO_GLOBAL_NQ_SIZE], auto_tuning_data[i][AUTO_NUM_GLOBAL_VERTS], *beta,
+                          edgefactor, auto_tuning_data[i][AUTO_PRE_GLOBAL_NQ_SIZE]);
     }
   }
 
@@ -88,12 +90,27 @@ bool auto_tuning_each(int param, int root_start, int num_bfs_roots, BfsOnCPU* be
   std::sort(l, l + l_num);
 
   bool value_is_smaller = false;
-  if(s_num == 0)
+  if(s_num == 0){
     return false;
-  else if(l_num == 0)
+  }
+  else if(l_num == 0){
     value_is_smaller = true;
-  else if(perf[s[0].idx] < perf[l[l_num-1].idx])
+  }
+  else if(perf[s[0].idx] < perf[l[l_num-1].idx]){
+    if(mpi.isMaster()){
+      print_with_prefix("Perf. = %.0f MTEPS in [%02d] < Perf. = %.0f MTEPS in [%02d]",
+                        perf[s[0].idx]/1000000, s[0].idx, perf[l[l_num-1].idx]/1000000, l[l_num-1].idx);
+      print_with_prefix("%s is smaller", (IS_ALPHA)? "Alpha" : "Beta");
+    }
     value_is_smaller = true;
+  }
+  else{
+    if(mpi.isMaster()){
+      print_with_prefix("Perf. = %.0f MTEPS in [%02d] >= Perf. = %.0f MTEPS in [%02d]",
+                        perf[s[0].idx]/1000000, s[0].idx, perf[l[l_num-1].idx]/1000000, l[l_num-1].idx);
+      print_with_prefix("%s is larger", (IS_ALPHA)? "Alpha" : "Beta");
+    }
+  }
   
   if(value_is_smaller){
     // When Alpha is decreased, T2B is increased.
