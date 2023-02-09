@@ -383,6 +383,12 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
                                     SCALE, edgefactor, auto_tuning_data, alpha, beta, perf);
         }
         else{
+          if(SCALE > 42){
+            if(mpi.isMaster())
+              print_with_prefix("Auto-tuning option cannot be supported SCALE > 42"); // Please define pf_nedge[43].
+            MPI_Finalize();
+            exit(1);
+          }
           MPI_Barrier(mpi.comm_2d);
           double elapsed_time = MPI_Wtime();
           
