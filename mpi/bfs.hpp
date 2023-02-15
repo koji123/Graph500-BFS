@@ -169,7 +169,9 @@ public:
 		 * - communication buffer for asynchronous communication:
 		 */
 
-		a2a_comm_buf_.allocate_memory(graph_.num_local_verts_ * sizeof(int32_t) * 50); // TODO: accuracy
+		size_t s = graph_.num_local_verts_ * sizeof(int32_t) * 50; // TODO: accuracy
+		a2a_comm_buf_.allocate_memory(s);
+		if(mpi.isMaster()) print_with_prefix("Allocating shared buffer: %f GB per node.", to_giga(s*2));
 
 		top_down_comm_.max_num_rows = graph_.num_local_verts_ * 16 / PRM::TOP_DOWN_PENDING_WIDTH + 1000;
 		top_down_comm_.tmp_rows = (TopDownRow*)cache_aligned_xmalloc(
@@ -280,7 +282,7 @@ public:
 
 	class CommBufferPool {
 	public:
-		void allocate_memory(int size) {
+		void allocate_memory(size_t size) {
 			first_buffer_ = cache_aligned_xmalloc(size);
 			second_buffer_ = cache_aligned_xmalloc(size);
 			current_index_ = 0;
