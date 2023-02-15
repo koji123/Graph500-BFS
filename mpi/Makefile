@@ -1,4 +1,4 @@
-SW =GNU3
+SW =GNU0
 #SW=FUGAKU
 VAMP = false
 SCOREP = false
@@ -43,6 +43,11 @@ LIBS := -lm
 ifeq ($(SW), GNU3)
 CFLAGS := $(GCC_BASE) -O3 -DNDEBUG -DPROFILE_REGIONS
 NVCCFLAGS := $(NVFLAG_BASE) -g -O3 -DNDEBUG -keep
+LIBS := $(LIBS) -lnuma
+endif
+ifeq ($(SW), GNU0)
+CFLAGS := $(GCC_BASE) -O0 -DNDEBUG -DPROFILE_REGIONS
+NVCCFLAGS := $(NVFLAG_BASE) -g -O0 -DNDEBUG -keep
 LIBS := $(LIBS) -lnuma
 endif
 ifeq ($(SW), FUGAKU)
