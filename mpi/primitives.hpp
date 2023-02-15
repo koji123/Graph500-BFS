@@ -30,11 +30,7 @@ struct UnweightedEdge {
 
 	static void initialize()
 	{
-		int block_length[] = {1, 1};
-		MPI_Aint displs[] = {
-				reinterpret_cast<MPI_Aint>(&(static_cast<UnweightedEdge*>(NULL)->v0_)),
-				reinterpret_cast<MPI_Aint>(&(static_cast<UnweightedEdge*>(NULL)->v1_)) };
-		MPI_Type_create_hindexed(2, block_length, displs, MPI_INT64_T, &MpiTypeOf<UnweightedEdge>::type);
+		MPI_Type_contiguous(2, MPI_INT64_T, &MpiTypeOf<UnweightedEdge>::type);
 		MPI_Type_commit(&MpiTypeOf<UnweightedEdge>::type);
 	}
 
@@ -65,12 +61,7 @@ struct UnweightedPackedEdge {
 
 	static void initialize()
 	{
-		int block_length[] = {1, 1, 1};
-		MPI_Aint displs[] = {
-				reinterpret_cast<MPI_Aint>(&(static_cast<UnweightedPackedEdge*>(NULL)->v0_low_)),
-				reinterpret_cast<MPI_Aint>(&(static_cast<UnweightedPackedEdge*>(NULL)->v1_low_)),
-				reinterpret_cast<MPI_Aint>(&(static_cast<UnweightedPackedEdge*>(NULL)->high_)) };
-		MPI_Type_create_hindexed(3, block_length, displs, MPI_UINT32_T, &MpiTypeOf<UnweightedPackedEdge>::type);
+		MPI_Type_contiguous(3, MPI_UINT32_T, &MpiTypeOf<UnweightedPackedEdge>::type);
 		MPI_Type_commit(&MpiTypeOf<UnweightedPackedEdge>::type);
 	}
 
