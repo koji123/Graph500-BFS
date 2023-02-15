@@ -134,7 +134,7 @@ public:
 		int64_t num_edges = row_starts_[non_zero_rows];
 
 		save("edge_array", edge_array_, num_edges * sizeof(int64_t));
-		save("row_starts", row_starts_, non_zero_rows * sizeof(int64_t));
+		save("row_starts", row_starts_, (non_zero_rows + 1) * sizeof(int64_t));
 		save("isolated_edges", isolated_edges_, non_zero_rows * sizeof(int64_t));
 		
 		free(edge_array_); edge_array_ = NULL;
@@ -162,10 +162,10 @@ public:
 		int64_t src_bitmap_size = local_bitmap_width * mpi.size_2dc;
 		int64_t non_zero_rows = row_sums_[src_bitmap_size];
 
-		row_starts_ = static_cast<int64_t*>(cache_aligned_xcalloc(non_zero_rows * sizeof(int64_t)));
+		row_starts_ = static_cast<int64_t*>(cache_aligned_xcalloc((non_zero_rows + 1) * sizeof(int64_t)));
 		isolated_edges_ = static_cast<int64_t*>(cache_aligned_xcalloc(non_zero_rows * sizeof(int64_t)));
 
-		load("row_starts", row_starts_, non_zero_rows * sizeof(int64_t));
+		load("row_starts", row_starts_, (non_zero_rows + 1) * sizeof(int64_t));
 		load("isolated_edges", isolated_edges_, non_zero_rows * sizeof(int64_t));
 		
 		int64_t num_edges = row_starts_[non_zero_rows];

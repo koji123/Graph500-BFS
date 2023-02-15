@@ -677,7 +677,7 @@ private:
 
 #pragma omp parallel
 		{
-			int* restrict counts = scatter_r.get_counts();
+			int* restrict counts = scatter.get_counts();
 
 #pragma omp for schedule(static)
 			for (int i = 0; i < num_vertexes; ++i) {
@@ -686,9 +686,9 @@ private:
 			} // #pragma omp for schedule(static)
 		}
 
-		scatter_r.sum();
+		scatter.sum();
 
-		send = scatter_r.scatter(vertexes_local);
+		send = scatter.scatter(vertexes_local);
 		
 		free(vertexes_local); vertexes_local = nullptr;
 	}
