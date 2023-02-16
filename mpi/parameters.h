@@ -46,9 +46,6 @@
 #define FUGAKU_MPI_PRINT_STATS 1
 #endif
 
-// 0: disable, 1: 1D, 2: 2D
-#define ENABLE_MY_ALLGATHER 0
-#define ENABLE_INLINE_ATOMICS 0
 #define ENABLE_FUJI_PROF 0
 
 // root switch to on/off debug print
@@ -112,7 +109,6 @@
 
 #ifdef __FUJITSU
 
-#define LOW_LEVEL_FUNCTION 1
 #define STREAM_UPDATE 1
 
 //#	define ENABLE_FJMPI 1
