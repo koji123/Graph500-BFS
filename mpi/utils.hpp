@@ -1715,9 +1715,11 @@ void setup_globals(int argc, char** argv, int SCALE, int edgefactor)
 		case omp_sched_auto:
 		  kind_str = "omp_sched_auto";
 		  break;
+#ifndef __FUJITSU
                case omp_sched_monotonic:
 	         kind_str = "omp_sched_monotonic";
 	         break;
+#endif
 	  }
 	  print_with_prefix("OpenMP default scheduling : %s, %d", kind_str, modifier);
 #else

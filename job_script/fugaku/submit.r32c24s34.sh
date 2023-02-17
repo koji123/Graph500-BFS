@@ -16,6 +16,7 @@ export TOFU_6D=xz
 export PLE_MPI_STD_EMPTYFILE=off
 export OMP_NUM_THREADS=48
 export FLIB_BARRIER=HARD
+export XOS_MMM_L_PAGING_POLICY=prepage:demand:demand
 S=34
 #############################
 DIR=result/r32c24s34

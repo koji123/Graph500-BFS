@@ -14,6 +14,7 @@ export TOFU_6D=xyza
 export PLE_MPI_STD_EMPTYFILE=off
 export OMP_NUM_THREADS=48
 export FLIB_BARRIER=HARD
+export XOS_MMM_L_PAGING_POLICY=prepage:demand:demand
 S=30
 #############################
 DIR=result/r8c6s30
