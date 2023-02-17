@@ -63,6 +63,9 @@
 
 #define BFELL 0
 
+#define PERSISTENT_COMM 1
+#define PERSISTENT_COMM_PRE_EXE_SCALE_THED 6
+
 // Optimization for CSR
 #define ISOLATE_FIRST_EDGE 1
 #define DEGREE_ORDER 0

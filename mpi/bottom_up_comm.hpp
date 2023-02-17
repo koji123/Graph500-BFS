@@ -14,6 +14,79 @@
 
 #define debug(...) debug_print(BUCOM, __VA_ARGS__)
 
+#if PERSISTENT_COMM
+static int p_recv_count = 0, p_send_count = 0;
+#define MAX_P_RECV_COUNT 12
+#define MAX_P_SEND_COUNT 16
+static MPI_Request p_recv_req[MAX_P_RECV_COUNT], p_send_req[MAX_P_SEND_COUNT];
+static void *p_recv_buf[MAX_P_RECV_COUNT], *p_send_buf[MAX_P_SEND_COUNT];
+static int p_recv_src[MAX_P_RECV_COUNT], p_send_len[MAX_P_SEND_COUNT], p_send_tgt[MAX_P_SEND_COUNT], p_send_tag[MAX_P_SEND_COUNT];
+
+static bool exist_p_recv(void *buf, int src)
+{
+  for(int i=0;i<p_recv_count;i++)
+    if(buf == p_recv_buf[i] && src == p_recv_src[i])
+      return true;
+
+  return false;
+}
+
+static bool exist_p_send(void *buf, int len, int tgt, int tag)
+{
+  for(int i=0;i<p_send_count;i++)
+    if(buf == p_send_buf[i] && len == p_send_len[i] && tgt == p_send_tgt[i] && tag == p_send_tag[i])
+      return true;
+  
+  return false;
+}
+
+static void add_p_recv(void *buf, int src)
+{
+  if(p_recv_count >= MAX_P_RECV_COUNT){
+    fprintf(stderr, "[%d] Something Wrong\n", mpi.rank_2d);
+    MPI_Abort(MPI_COMM_WORLD, 1);
+  }
+  p_recv_buf[p_recv_count] = buf;
+  p_recv_src[p_recv_count] = src;
+  p_recv_count++;
+}
+
+static void add_p_send(void *buf, int len, int tgt, int tag)
+{
+  if(p_send_count >= MAX_P_SEND_COUNT){
+    fprintf(stderr, "[%d] Something Wrong\n", mpi.rank_2d);
+    MPI_Abort(MPI_COMM_WORLD, 1);
+  }
+  p_send_buf[p_send_count] = buf;
+  p_send_len[p_send_count] = len;
+  p_send_tgt[p_send_count] = tgt;
+  p_send_tag[p_send_count] = tag;
+  p_send_count++;
+}
+
+static MPI_Request* get_p_recv(void *buf, int src)
+{
+  for(int i=0;i<p_recv_count;i++)
+    if(buf == p_recv_buf[i] && src == p_recv_src[i])
+      return &p_recv_req[i];
+
+  fprintf(stderr, "[%d] Something Wrong\n", mpi.rank_2d);
+  MPI_Abort(MPI_COMM_WORLD, 1);
+  return NULL; // dummy
+}
+
+static MPI_Request* get_p_send(void *buf, int len, int tgt, int tag)
+{
+  for(int i=0;i<p_send_count;i++)
+    if(buf == p_send_buf[i] && len == p_send_len[i] && tgt == p_send_tgt[i] && tag == p_send_tag[i])
+      return &p_send_req[i];
+  
+  fprintf(stderr, "[%d] Something Wrong\n", mpi.rank_2d);
+  MPI_Abort(MPI_COMM_WORLD, 1);
+  return NULL; // dummy
+}
+#endif
+
 struct BottomUpSubstepTag {
 	int64_t length;
 	int region_id; // < 1024
@@ -258,16 +331,45 @@ protected:
 		int recv_1 = recv_top++ % NBUF;
 		recv_pair[recv_0].data = get_buffer();
 		recv_pair[recv_1].data = get_buffer();
-		MPI_Irecv(recv_pair[recv_0].data, buffer_width,
-				type, nodes_[0].rank, MPI_ANY_TAG, mpi_comm, &req[0]);
-		MPI_Irecv(recv_pair[recv_1].data, buffer_width,
-				type, nodes_[1].rank, MPI_ANY_TAG, mpi_comm, &req[1]);
-		//print_with_prefix("bottom_up_comm.hpp : send_recv()");
-		MPI_Isend(send_pair[0].data, send_pair[0].tag.length,
-				type, nodes_[1].rank, make_tag(send_pair[0].tag), mpi_comm, &req[2]);
-		MPI_Isend(send_pair[1].data, send_pair[1].tag.length,
-				type, nodes_[0].rank, make_tag(send_pair[1].tag), mpi_comm, &req[3]);
-
+#if PERSISTENT_COMM
+		if(!exist_p_recv(recv_pair[recv_0].data, nodes_[0].rank)){
+		  MPI_Recv_init(recv_pair[recv_0].data, buffer_width,
+				type, nodes_[0].rank, MPI_ANY_TAG, mpi_comm, &p_recv_req[p_recv_count]);
+		  add_p_recv(recv_pair[recv_0].data, nodes_[0].rank);
+		}
+		if(!exist_p_recv(recv_pair[recv_1].data, nodes_[1].rank)){
+		  MPI_Recv_init(recv_pair[recv_1].data, buffer_width,
+				type, nodes_[1].rank, MPI_ANY_TAG, mpi_comm, &p_recv_req[p_recv_count]);
+		  add_p_recv(recv_pair[recv_1].data, nodes_[1].rank);
+		}
+		memcpy(&req[0], get_p_recv(recv_pair[recv_0].data, nodes_[0].rank), sizeof(MPI_Request));
+		memcpy(&req[1], get_p_recv(recv_pair[recv_1].data, nodes_[1].rank), sizeof(MPI_Request));
+#else
+		MPI_Irecv(recv_pair[recv_0].data, buffer_width, type, nodes_[0].rank, MPI_ANY_TAG, mpi_comm, &req[0]);
+		MPI_Irecv(recv_pair[recv_1].data, buffer_width, type, nodes_[1].rank, MPI_ANY_TAG, mpi_comm, &req[1]);
+#endif
+		//print_with_prefix("[%d] Recv0 : %p %d %d", mpi.rank_2d, recv_pair[recv_0].data, buffer_width, nodes_[0].rank);
+		//print_with_prefix("[%d] Recv1 : %p %d %d", mpi.rank_2d, recv_pair[recv_1].data, buffer_width, nodes_[1].rank);
+#if PERSISTENT_COMM
+		if(!exist_p_send(send_pair[0].data, send_pair[0].tag.length, nodes_[1].rank, make_tag(send_pair[0].tag))){
+		  MPI_Send_init(send_pair[0].data, send_pair[0].tag.length,
+				type, nodes_[1].rank, make_tag(send_pair[0].tag), mpi_comm, &p_send_req[p_send_count]);
+		  add_p_send(send_pair[0].data, send_pair[0].tag.length, nodes_[1].rank, make_tag(send_pair[0].tag));
+		}
+		if(!exist_p_send(send_pair[1].data, send_pair[1].tag.length, nodes_[0].rank, make_tag(send_pair[1].tag))){
+		  MPI_Send_init(send_pair[1].data, send_pair[1].tag.length,
+				type, nodes_[0].rank, make_tag(send_pair[1].tag), mpi_comm, &p_send_req[p_send_count]);
+		  add_p_send(send_pair[1].data, send_pair[1].tag.length, nodes_[0].rank, make_tag(send_pair[1].tag));
+		}
+		memcpy(&req[2], get_p_send(send_pair[0].data, send_pair[0].tag.length, nodes_[1].rank, make_tag(send_pair[0].tag)), sizeof(MPI_Request));
+		memcpy(&req[3], get_p_send(send_pair[1].data, send_pair[1].tag.length, nodes_[0].rank, make_tag(send_pair[1].tag)), sizeof(MPI_Request));
+		MPI_Startall(4, req);
+#else
+		MPI_Isend(send_pair[0].data, send_pair[0].tag.length, type, nodes_[1].rank, make_tag(send_pair[0].tag), mpi_comm, &req[2]);
+		MPI_Isend(send_pair[1].data, send_pair[1].tag.length, type, nodes_[0].rank, make_tag(send_pair[1].tag), mpi_comm, &req[3]);
+#endif
+		//print_with_prefix("[%d] Send0 : %p %d %d %d", mpi.rank_2d, send_pair[0].data, send_pair[0].tag.length, nodes_[1].rank, make_tag(send_pair[0].tag));
+		//print_with_prefix("[%d] Send1 : %p %d %d %d", mpi.rank_2d, send_pair[1].data, send_pair[1].tag.length, nodes_[0].rank, make_tag(send_pair[1].tag));
 		send_pair[2] = send_pair[0];
 		send_pair[3] = send_pair[1];
 		is_active = true;

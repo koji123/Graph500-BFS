@@ -376,6 +376,18 @@ void graph500_bfs(int SCALE, int edgefactor, double alpha, double beta, int vali
 
 	benchmark->prepare_bfs(validation_level, pre_exec, real_benchmark);
 
+#if PERSISTENT_COMM
+	// To improve performance, MPI_Request is pre-created for MPI_Send_init() and MPI_Recv_init()
+	if(SCALE > PERSISTENT_COMM_PRE_EXE_SCALE_THED){
+	  for(int j = 0; j < AUTO_NUM; ++j)
+	    auto_tuning_data[0][j] = AUTO_NOT_DEFINED;
+
+	  int k = 0;
+	  while(auto_tuning_data[0][AUTO_T2B_LEVEL] == AUTO_NOT_DEFINED){
+	    benchmark->run_bfs(k++, pred, edgefactor, alpha, beta, auto_tuning_data[0]);
+	  }
+	}
+#endif
         if(auto_tuning_enabled == false){
           int64_t auto_tuning_data[num_bfs_roots][AUTO_NUM]; // not used
           double perf[num_bfs_roots];                        // not used
