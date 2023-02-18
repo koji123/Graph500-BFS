@@ -1,7 +1,7 @@
 #!/bin/bash
 #PJM -L "node=2x3x4:strict"
 #PJM -L "rscgrp=small-torus"
-#PJM -L "elapse=1:00:00"
+#PJM -L "elapse=0:15:00"
 #PJM -L "freq=2200,eco_state=2"
 #PJM --rsc-list "retention_state=0"
 #PJM --mpi "assign-online-node"
