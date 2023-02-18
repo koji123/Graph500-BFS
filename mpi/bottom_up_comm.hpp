@@ -12,8 +12,25 @@
 #include "abstract_comm.hpp"
 #include "utils.hpp"
 #if PERSISTENT_COMM
-#include <map>
+#include <unordered_map>
 #include <tuple>
+namespace std {
+  template <>
+  class hash<std::tuple<void*, int, int, int>> {
+  public:
+    size_t operator()(const std::tuple<void*, int, int, int>& x) const{
+      return hash<void*>()(get<0>(x)) ^ hash<int>()(get<1>(x)) ^ hash<int>()(get<2>(x)) ^ hash<int>()(get<3>(x));
+    }
+  };
+  
+  template <>
+  class hash<std::pair<void*, int>> {
+  public:
+    size_t operator()(const std::pair<void*, int>& x) const{
+      return hash<void*>()(x.first) ^ hash<int>()(x.second);
+    }
+  };
+}
 #endif
 #define debug(...) debug_print(BUCOM, __VA_ARGS__)
 
@@ -216,8 +233,8 @@ protected:
 #if PERSISTENT_COMM
        int recv_count = 0, send_count = 0;
        MPI_Request *recv_req, *send_req;
-       std::map<std::pair<void*,int>, MPI_Request> recv_map;
-       std::map<std::tuple<void*,int,int,int>, MPI_Request> send_map;
+       std::unordered_map<std::pair<void*,int>, MPI_Request> recv_map;
+       std::unordered_map<std::tuple<void*,int,int,int>, MPI_Request> send_map;
 #endif
 
 	virtual CommTargetBase& nodes(int target) { return nodes_[target]; }
