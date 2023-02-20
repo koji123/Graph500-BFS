@@ -1,4 +1,4 @@
-SW =GNU0
+SW =GNU3
 #SW=FUGAKU
 VAMP = false
 SCOREP = false
