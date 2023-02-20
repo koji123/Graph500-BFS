@@ -568,9 +568,13 @@ public:
 	int get_edge_preds(int64_t* edge_data, int64_t* edge_preds, int offset, int num)
 	{
 		num = std::min(num_edges - offset, num);
+#pragma omp parallel for
 		for(int i = 0; i < num; ++i) {
 			edge_data[i * 2 + 0] = vertexes_r[indexes_r[i + offset]];
 			edge_data[i * 2 + 1] = vertexes_c[indexes_c[i + offset]];
+		}
+#pragma omp parallel for
+		for(int i = 0; i < num; ++i) {
 			edge_preds[i * 2 + 0] = pred_r[indexes_r[i + offset]];
 			edge_preds[i * 2 + 1] = pred_c[indexes_c[i + offset]];
 		}
@@ -636,13 +640,18 @@ private:
 		auto swizzle = [](int64_t v) { return SeparatedId(vertex_owner(v), vertex_local(v), 40).value; };
 		auto unswizzle = [](int64_t v) { SeparatedId id(v); return compose_vertex(id.high(40), id.low(40)); };
 
+#pragma omp parallel for
 		for(int i = 0; i < num_edges; ++i) {
 			// プロセスごとに分けたいので、プロセス番号が上位ビットになるようにする
 			edge_vertexes[i] = swizzle(edge_vertex(i));
 			edge_indexes[i] = i;
 		}
 
+		if(mpi.isMaster()) print_with_prefix("Sorting edges...");
+
 		sort2(edge_vertexes, edge_indexes, num_edges);
+
+		if(mpi.isMaster()) print_with_prefix("Counting unique vertexes...");
 
 		// ユニーク頂点数を数える
 		int64_t prev = -1;
@@ -696,6 +705,7 @@ private:
 	int64_t* gather_pred(int64_t* pred, int* send, ScatterContext& scatter) {
 		int num_send = scatter.get_recv_count();
 		int64_t* pred_send = static_cast<int64_t*>(cache_aligned_xmalloc(num_send * sizeof(int64_t)));
+#pragma omp parallel for
 		for(int i = 0; i < num_send; ++i) {
 			pred_send[i] = pred[send[i]];
 		}
