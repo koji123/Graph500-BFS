@@ -63,7 +63,7 @@
 
 #define BFELL 0
 
-#define PERSISTENT_COMM 1
+#define PERSISTENT_COMM 0
 #define PERSISTENT_COMM_PRE_EXE_SCALE_THED 6
 
 // Optimization for CSR
